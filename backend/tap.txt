@@ -1,0 +1,1182 @@
+TAP version 13
+# [auth] student registered: eve@college.edu
+# Subtest: signup creates a student and ignores a client-supplied role
+ok 1 - signup creates a student and ignores a client-supplied role
+  ---
+  duration_ms: 790.067
+  type: 'test'
+  ...
+# [auth] student registered: mallory-0-admin@college.edu
+# [auth] student registered: mallory-1-staff@college.edu
+# [auth] student registered: mallory-2-admin@college.edu
+# [auth] student registered: mallory-3-admin@college.edu
+# [auth] student registered: mallory-4-superuser@college.edu
+# Subtest: signup cannot escalate via any privileged role value
+ok 2 - signup cannot escalate via any privileged role value
+  ---
+  duration_ms: 418.6794
+  type: 'test'
+  ...
+# [auth] student registered: safe@college.edu
+# Subtest: signup never returns or stores the password in plaintext
+ok 3 - signup never returns or stores the password in plaintext
+  ---
+  duration_ms: 67.7672
+  type: 'test'
+  ...
+# [auth] student registered: dup@college.edu
+# Subtest: signup rejects a duplicate email with 409, not 500
+ok 4 - signup rejects a duplicate email with 409, not 500
+  ---
+  duration_ms: 130.163
+  type: 'test'
+  ...
+# Subtest: signup validates email, password length and name
+ok 5 - signup validates email, password length and name
+  ---
+  duration_ms: 12.187
+  type: 'test'
+  ...
+# Subtest: login returns the original { token, role, name } contract
+ok 6 - login returns the original { token, role, name } contract
+  ---
+  duration_ms: 131.3829
+  type: 'test'
+  ...
+# Subtest: login is case-insensitive on email
+ok 7 - login is case-insensitive on email
+  ---
+  duration_ms: 132.207
+  type: 'test'
+  ...
+# Subtest: login with a wrong password and a wrong email give the same 401
+ok 8 - login with a wrong password and a wrong email give the same 401
+  ---
+  duration_ms: 128.8701
+  type: 'test'
+  ...
+# Subtest: GET /api/auth/me returns the current user
+ok 9 - GET /api/auth/me returns the current user
+  ---
+  duration_ms: 124.6435
+  type: 'test'
+  ...
+# Subtest: GET /api/auth/me accepts a bare token for backward compatibility
+ok 10 - GET /api/auth/me accepts a bare token for backward compatibility
+  ---
+  duration_ms: 130.9388
+  type: 'test'
+  ...
+# Subtest: GET /api/auth/me rejects missing, invalid and foreign-scheme tokens
+ok 11 - GET /api/auth/me rejects missing, invalid and foreign-scheme tokens
+  ---
+  duration_ms: 6.4341
+  type: 'test'
+  ...
+# Subtest: GET /api/auth/me 401s when the account has been deleted
+ok 12 - GET /api/auth/me 401s when the account has been deleted
+  ---
+  duration_ms: 142.1662
+  type: 'test'
+  ...
+# Subtest: an expired token returns a clear 401 rather than a 500
+ok 13 - an expired token returns a clear 401 rather than a 500
+  ---
+  duration_ms: 134.4525
+  type: 'test'
+  ...
+# Subtest: PUT /api/auth/me cannot change the caller's role
+ok 14 - PUT /api/auth/me cannot change the caller's role
+  ---
+  duration_ms: 269.3126
+  type: 'test'
+  ...
+# Subtest: GET /api/food returns a plain array with no query params (unchanged contract)
+ok 15 - GET /api/food returns a plain array with no query params (unchanged contract)
+  ---
+  duration_ms: 786.6714
+  type: 'test'
+  ...
+# Subtest: new food items get backward-compatible defaults
+ok 16 - new food items get backward-compatible defaults
+  ---
+  duration_ms: 12.6175
+  type: 'test'
+  ...
+# Subtest: food search, category filter and sort work together
+ok 17 - food search, category filter and sort work together
+  ---
+  duration_ms: 49.0983
+  type: 'test'
+  ...
+# Subtest: an invalid sort key is rejected
+ok 18 - an invalid sort key is rejected
+  ---
+  duration_ms: 14.5711
+  type: 'test'
+  ...
+# Subtest: GET /api/food/categories lists distinct categories
+ok 19 - GET /api/food/categories lists distinct categories
+  ---
+  duration_ms: 15.418
+  type: 'test'
+  ...
+# Subtest: only admin/staff can create food
+ok 20 - only admin/staff can create food
+  ---
+  duration_ms: 175.8913
+  type: 'test'
+  ...
+# Subtest: an admin can create food with validation
+ok 21 - an admin can create food with validation
+  ---
+  duration_ms: 174.5539
+  type: 'test'
+  ...
+# Subtest: PUT /api/food/:id ignores unknown fields instead of mass-assigning
+ok 22 - PUT /api/food/:id ignores unknown fields instead of mass-assigning
+  ---
+  duration_ms: 144.2008
+  type: 'test'
+  ...
+# Subtest: a malformed food id yields 400, not 500
+ok 23 - a malformed food id yields 400, not 500
+  ---
+  duration_ms: 133.2939
+  type: 'test'
+  ...
+# Subtest: updating a missing food returns 404
+ok 24 - updating a missing food returns 404
+  ---
+  duration_ms: 128.2152
+  type: 'test'
+  ...
+# Subtest: staff may manage the kitchen menu but students may not
+ok 25 - staff may manage the kitchen menu but students may not
+  ---
+  duration_ms: 125.9514
+  type: 'test'
+  ...
+# Subtest: deleting food requires admin/staff and 404s when missing
+ok 26 - deleting food requires admin/staff and 404s when missing
+  ---
+  duration_ms: 260.6012
+  type: 'test'
+  ...
+# Subtest: health endpoint responds
+ok 27 - health endpoint responds
+  ---
+  duration_ms: 1903.0295
+  type: 'test'
+  ...
+# Subtest: full workflow: student registers, browses, orders; admin fulfils
+ok 28 - full workflow: student registers, browses, orders; admin fulfils
+  ---
+  duration_ms: 453.5339
+  type: 'test'
+  ...
+# Subtest: a session survives a simulated page refresh and then expires cleanly
+ok 29 - a session survives a simulated page refresh and then expires cleanly
+  ---
+  duration_ms: 218.6285
+  type: 'test'
+  ...
+# Subtest: security headers are present on real responses
+ok 30 - security headers are present on real responses
+  ---
+  duration_ms: 12.8087
+  type: 'test'
+  ...
+# Subtest: an unknown route returns JSON 404 rather than an HTML error page
+ok 31 - an unknown route returns JSON 404 rather than an HTML error page
+  ---
+  duration_ms: 16.149
+  type: 'test'
+  ...
+# Subtest: Phase 2: full lifecycle over HTTP, driven by a real server
+ok 32 - Phase 2: full lifecycle over HTTP, driven by a real server
+  ---
+  duration_ms: 316.3876
+  type: 'test'
+  ...
+# Subtest: Phase 2: student cancellation and idempotency over HTTP
+ok 33 - Phase 2: student cancellation and idempotency over HTTP
+  ---
+  duration_ms: 369.5008
+  type: 'test'
+  ...
+# Subtest: Phase 2: concurrent conflicting transitions resolve to one winner
+ok 34 - Phase 2: concurrent conflicting transitions resolve to one winner
+  ---
+  duration_ms: 212.7165
+  type: 'test'
+  ...
+# Subtest: the test environment really supports transactions
+ok 35 - the test environment really supports transactions
+  ---
+  duration_ms: 924.7052
+  type: 'test'
+  ...
+# Subtest: existing food documents without inventory fields remain functional
+ok 36 - existing food documents without inventory fields remain functional
+  ---
+  duration_ms: 354.0961
+  type: 'test'
+  ...
+# Subtest: a pre-Phase-4 item with stock 0 still behaves as sold out
+ok 37 - a pre-Phase-4 item with stock 0 still behaves as sold out
+  ---
+  duration_ms: 152.2144
+  type: 'test'
+  ...
+# Subtest: an untracked item is never limited by inventory
+ok 38 - an untracked item is never limited by inventory
+  ---
+  duration_ms: 151.2339
+  type: 'test'
+  ...
+# Subtest: inventory tracking can be enabled for an existing item
+ok 39 - inventory tracking can be enabled for an existing item
+  ---
+  duration_ms: 169.8629
+  type: 'test'
+  ...
+# Subtest: enabling tracking requires a starting stock quantity
+ok 40 - enabling tracking requires a starting stock quantity
+  ---
+  duration_ms: 145.0893
+  type: 'test'
+  ...
+# Subtest: a valid order reserves the correct stock quantity
+ok 41 - a valid order reserves the correct stock quantity
+  ---
+  duration_ms: 171.9396
+  type: 'test'
+  ...
+# Subtest: an order exceeding available stock is rejected and reserves nothing
+ok 42 - an order exceeding available stock is rejected and reserves nothing
+  ---
+  duration_ms: 222.3954
+  type: 'test'
+  ...
+# Subtest: a multi-item order fails completely when one tracked item is short
+ok 43 - a multi-item order fails completely when one tracked item is short
+  ---
+  duration_ms: 314.9236
+  type: 'test'
+  ...
+# Subtest: reserving exactly the available quantity is allowed
+ok 44 - reserving exactly the available quantity is allowed
+  ---
+  duration_ms: 285.7361
+  type: 'test'
+  ...
+# Subtest: concurrent orders cannot oversell a tracked item
+ok 45 - concurrent orders cannot oversell a tracked item
+  ---
+  duration_ms: 503.8879
+  type: 'test'
+  ...
+# Subtest: concurrent larger orders cannot oversell either
+ok 46 - concurrent larger orders cannot oversell either
+  ---
+  duration_ms: 281.4478
+  type: 'test'
+  ...
+# Subtest: cancelling a Pending order releases stock exactly once
+ok 47 - cancelling a Pending order releases stock exactly once
+  ---
+  duration_ms: 252.44
+  type: 'test'
+  ...
+# Subtest: rejecting an eligible order releases the outstanding reservation
+ok 48 - rejecting an eligible order releases the outstanding reservation
+  ---
+  duration_ms: 432.4274
+  type: 'test'
+  ...
+# Subtest: starting preparation consumes the reservation exactly once
+ok 49 - starting preparation consumes the reservation exactly once
+  ---
+  duration_ms: 532.0767
+  type: 'test'
+  ...
+# Subtest: direct advancement to Ready or Completed still consumes stock once
+ok 50 - direct advancement to Ready or Completed still consumes stock once
+  ---
+  duration_ms: 477.1497
+  type: 'test'
+  ...
+# Subtest: walking the full lifecycle consumes only once
+ok 51 - walking the full lifecycle consumes only once
+  ---
+  duration_ms: 452.9524
+  type: 'test'
+  ...
+# Subtest: repeated cancellation cannot release stock twice
+ok 52 - repeated cancellation cannot release stock twice
+  ---
+  duration_ms: 293.658
+  type: 'test'
+  ...
+# Subtest: repeated preparation-start requests consume stock only once
+ok 53 - repeated preparation-start requests consume stock only once
+  ---
+  duration_ms: 458.3937
+  type: 'test'
+  ...
+# Subtest: a replayed reservation is ignored via the ledger's unique operation id
+ok 54 - a replayed reservation is ignored via the ledger's unique operation id
+  ---
+  duration_ms: 224.6478
+  type: 'test'
+  ...
+# Subtest: cancelling during preparation does not restore consumed stock
+ok 55 - cancelling during preparation does not restore consumed stock
+  ---
+  duration_ms: 628.9128
+  type: 'test'
+  ...
+# Subtest: recoverable stock after a preparation cancellation needs an explicit adjustment
+ok 56 - recoverable stock after a preparation cancellation needs an explicit adjustment
+  ---
+  duration_ms: 634.7086
+  type: 'test'
+  ...
+# Subtest: manual stock adjustments require authorization and a reason
+ok 57 - manual stock adjustments require authorization and a reason
+  ---
+  duration_ms: 206.8745
+  type: 'test'
+  ...
+# Subtest: students and staff cannot perform inventory operations
+ok 58 - students and staff cannot perform inventory operations
+  ---
+  duration_ms: 485.0636
+  type: 'test'
+  ...
+# Subtest: negative, fractional and malformed adjustments are rejected
+ok 59 - negative, fractional and malformed adjustments are rejected
+  ---
+  duration_ms: 201.3147
+  type: 'test'
+  ...
+# Subtest: stock cannot be reduced below zero
+ok 60 - stock cannot be reduced below zero
+  ---
+  duration_ms: 172.7779
+  type: 'test'
+  ...
+# Subtest: invalid order quantities are still rejected before any reservation
+ok 61 - invalid order quantities are still rejected before any reservation
+  ---
+  duration_ms: 202.6393
+  type: 'test'
+  ...
+# Subtest: a failed multi-item order leaves no partial reservation or order
+ok 62 - a failed multi-item order leaves no partial reservation or order
+  ---
+  duration_ms: 193.2958
+  type: 'test'
+  ...
+# Subtest: the ledger accurately reflects every successful operation
+ok 63 - the ledger accurately reflects every successful operation
+  ---
+  duration_ms: 448.2383
+  type: 'test'
+  ...
+# Subtest: every ledger operation id is unique
+ok 64 - every ledger operation id is unique
+  ---
+  duration_ms: 597.6367
+  type: 'test'
+  ...
+# Subtest: an administrator can inspect movement history per item
+ok 65 - an administrator can inspect movement history per item
+  ---
+  duration_ms: 474.0625
+  type: 'test'
+  ...
+# Subtest: sold-out and low-stock conditions are reported correctly
+ok 66 - sold-out and low-stock conditions are reported correctly
+  ---
+  duration_ms: 139.7372
+  type: 'test'
+  ...
+# Subtest: low-stock alerts resolve once stock is restored and do not repeat
+ok 67 - low-stock alerts resolve once stock is restored and do not repeat
+  ---
+  duration_ms: 159.828
+  type: 'test'
+  ...
+# Subtest: an out-of-stock tracked item cannot be ordered
+ok 68 - an out-of-stock tracked item cannot be ordered
+  ---
+  duration_ms: 129.0447
+  type: 'test'
+  ...
+# Subtest: the inventory report filters by search, category and state
+ok 69 - the inventory report filters by search, category and state
+  ---
+  duration_ms: 154.4147
+  type: 'test'
+  ...
+# Subtest: existing menu endpoints and order flow are unchanged
+ok 70 - existing menu endpoints and order flow are unchanged
+  ---
+  duration_ms: 131.8655
+  type: 'test'
+  ...
+# Subtest: tracked items do not change the order lifecycle or cancellation rules
+ok 71 - tracked items do not change the order lifecycle or cancellation rules
+  ---
+  duration_ms: 358.865
+  type: 'test'
+  ...
+# Subtest: manual availability toggle remains separate from stock
+ok 72 - manual availability toggle remains separate from stock
+  ---
+  duration_ms: 253.6137
+  type: 'test'
+  ...
+# Subtest: this deployment does NOT support transactions, as expected
+ok 73 - this deployment does NOT support transactions, as expected
+  ---
+  duration_ms: 669.1901
+  type: 'test'
+  ...
+# Subtest: withOptionalTransaction runs without a session on this topology
+ok 74 - withOptionalTransaction runs without a session on this topology
+  ---
+  duration_ms: 6.9428
+  type: 'test'
+  ...
+# Subtest: concurrent orders cannot oversell without transactions
+ok 75 - concurrent orders cannot oversell without transactions
+  ---
+  duration_ms: 385.8125
+  type: 'test'
+  ...
+# Subtest: a failed multi-item order compensates cleanly without transactions
+ok 76 - a failed multi-item order compensates cleanly without transactions
+  ---
+  duration_ms: 149.9748
+  type: 'test'
+  ...
+# Subtest: reserve, consume and release all work without transactions
+ok 77 - reserve, consume and release all work without transactions
+  ---
+  duration_ms: 291.9261
+  type: 'test'
+  ...
+# Subtest: cancelling before preparation releases exactly once without transactions
+ok 78 - cancelling before preparation releases exactly once without transactions
+  ---
+  duration_ms: 159.7918
+  type: 'test'
+  ...
+# Subtest: concurrent orders then concurrent cancels return the stock exactly once
+ok 79 - concurrent orders then concurrent cancels return the stock exactly once
+  ---
+  duration_ms: 226.762
+  type: 'test'
+  ...
+# Subtest: counters never go negative under sustained concurrency
+ok 80 - counters never go negative under sustained concurrency
+  ---
+  duration_ms: 502.4408
+  type: 'test'
+  ...
+# Subtest: legacy untracked items are unaffected on a standalone deployment
+ok 81 - legacy untracked items are unaffected on a standalone deployment
+  ---
+  duration_ms: 243.7304
+  type: 'test'
+  ...
+# Subtest: a student cannot read the kitchen feed
+ok 82 - a student cannot read the kitchen feed
+  ---
+  duration_ms: 956.5666
+  type: 'test'
+  ...
+# Subtest: an unauthenticated request cannot read the kitchen feed
+ok 83 - an unauthenticated request cannot read the kitchen feed
+  ---
+  duration_ms: 10.9531
+  type: 'test'
+  ...
+# Subtest: admin and staff can both read the kitchen feed
+ok 84 - admin and staff can both read the kitchen feed
+  ---
+  duration_ms: 429.3962
+  type: 'test'
+  ...
+# Subtest: /kitchen is not shadowed by the /:id route
+ok 85 - /kitchen is not shadowed by the /:id route
+  ---
+  duration_ms: 131.2596
+  type: 'test'
+  ...
+# Subtest: the feed contains only orders still in progress
+ok 86 - the feed contains only orders still in progress
+  ---
+  duration_ms: 378.4142
+  type: 'test'
+  ...
+# Subtest: the feed is sorted oldest first, so the longest wait is on top
+ok 87 - the feed is sorted oldest first, so the longest wait is on top
+  ---
+  duration_ms: 2625.9659
+  type: 'test'
+  ...
+# Subtest: waitSeconds is provided and non-negative
+ok 88 - waitSeconds is provided and non-negative
+  ---
+  duration_ms: 465.5177
+  type: 'test'
+  ...
+# Subtest: each feed entry carries the server-derived allowedTransitions
+ok 89 - each feed entry carries the server-derived allowedTransitions
+  ---
+  duration_ms: 425.2077
+  type: 'test'
+  ...
+# Subtest: the feed populates the student and carries kitchen-relevant detail
+ok 90 - the feed populates the student and carries kitchen-relevant detail
+  ---
+  duration_ms: 355.246
+  type: 'test'
+  ...
+# Subtest: a staff member's feed reflects their own permissions
+ok 91 - a staff member's feed reflects their own permissions
+  ---
+  duration_ms: 377.2383
+  type: 'test'
+  ...
+# Subtest: a settled order disappears from the feed once cancelled by the student
+ok 92 - a settled order disappears from the feed once cancelled by the student
+  ---
+  duration_ms: 325.5672
+  type: 'test'
+  ...
+# Subtest: the feed never leaks orders through a malformed filter
+ok 93 - the feed never leaks orders through a malformed filter
+  ---
+  duration_ms: 328.9855
+  type: 'test'
+  ...
+# Subtest: KDS actions go through the same lifecycle enforcement
+ok 94 - KDS actions go through the same lifecycle enforcement
+  ---
+  duration_ms: 436.5182
+  type: 'test'
+  ...
+# Subtest: the feed is empty when nothing is in progress
+ok 95 - the feed is empty when nothing is in progress
+  ---
+  duration_ms: 367.0191
+  type: 'test'
+  ...
+# Subtest: the kitchen feed works with no socket client attached at all
+ok 96 - the kitchen feed works with no socket client attached at all
+  ---
+  duration_ms: 321.0987
+  type: 'test'
+  ...
+# Subtest: kitchen actions remain correct when realtime is disabled entirely
+ok 97 - kitchen actions remain correct when realtime is disabled entirely
+  ---
+  duration_ms: 296.3109
+  type: 'test'
+  ...
+# [auth] student registered: s-89gf2f@college.edu
+# Subtest: order total is computed from database prices, not the client
+ok 98 - order total is computed from database prices, not the client
+  ---
+  duration_ms: 956.7905
+  type: 'test'
+  ...
+# [auth] student registered: s-cq9csz@college.edu
+# Subtest: client-supplied item name and price are ignored
+ok 99 - client-supplied item name and price are ignored
+  ---
+  duration_ms: 169.4063
+  type: 'test'
+  ...
+# [auth] student registered: s-7xsz8k@college.edu
+# Subtest: a negative total in the request cannot create a negative order
+ok 100 - a negative total in the request cannot create a negative order
+  ---
+  duration_ms: 141.5524
+  type: 'test'
+  ...
+# [auth] student registered: s-hief3j@college.edu
+# Subtest: totals are exact for fractional prices (no float drift)
+ok 101 - totals are exact for fractional prices (no float drift)
+  ---
+  duration_ms: 146.9919
+  type: 'test'
+  ...
+# [auth] student registered: s-0ot7x1@college.edu
+# Subtest: rejects invalid quantities: zero, negative, fractional, huge and non-numeric
+ok 102 - rejects invalid quantities: zero, negative, fractional, huge and non-numeric
+  ---
+  duration_ms: 163.9606
+  type: 'test'
+  ...
+# [auth] student registered: s-ar2rub@college.edu
+# Subtest: rejects an empty cart, a non-array cart, and a malformed food id
+ok 103 - rejects an empty cart, a non-array cart, and a malformed food id
+  ---
+  duration_ms: 133.6515
+  type: 'test'
+  ...
+# [auth] student registered: s-r6t2uw@college.edu
+# Subtest: rejects an order referencing a food item that does not exist
+ok 104 - rejects an order referencing a food item that does not exist
+  ---
+  duration_ms: 130.3036
+  type: 'test'
+  ...
+# [auth] student registered: s-gr3fr9@college.edu
+# Subtest: duplicate lines for the same item are merged, not double-counted
+ok 105 - duplicate lines for the same item are merged, not double-counted
+  ---
+  duration_ms: 132.9937
+  type: 'test'
+  ...
+# [auth] student registered: s-2pkz62@college.edu
+# Subtest: splitting duplicates cannot smuggle past the per-item quantity cap
+ok 106 - splitting duplicates cannot smuggle past the per-item quantity cap
+  ---
+  duration_ms: 127.4596
+  type: 'test'
+  ...
+# [auth] student registered: s-k8nih6@college.edu
+# Subtest: cannot order an item that is marked unavailable or sold out
+ok 107 - cannot order an item that is marked unavailable or sold out
+  ---
+  duration_ms: 268.2103
+  type: 'test'
+  ...
+# Subtest: ordering requires authentication
+ok 108 - ordering requires authentication
+  ---
+  duration_ms: 9.5582
+  type: 'test'
+  ...
+# [auth] student registered: s-0lvtia@college.edu
+# Subtest: a student cannot read all orders
+ok 109 - a student cannot read all orders
+  ---
+  duration_ms: 241.2519
+  type: 'test'
+  ...
+# [auth] student registered: s-kkpbxe@college.edu
+# Subtest: a student cannot update order status
+ok 110 - a student cannot update order status
+  ---
+  duration_ms: 390.848
+  type: 'test'
+  ...
+# [auth] student registered: s-amvqfr@college.edu
+# Subtest: an admin cannot update an order status they are not allowed to name
+ok 111 - an admin cannot update an order status they are not allowed to name
+  ---
+  duration_ms: 473.3212
+  type: 'test'
+  ...
+# [auth] student registered: s-j1kbpy@college.edu
+# Subtest: a completed order is terminal and cannot be reverted
+ok 112 - a completed order is terminal and cannot be reverted
+  ---
+  duration_ms: 339.8986
+  type: 'test'
+  ...
+# [auth] student registered: s-7hpgww@college.edu
+# Subtest: status updates are recorded in statusHistory
+ok 113 - status updates are recorded in statusHistory
+  ---
+  duration_ms: 312.7008
+  type: 'test'
+  ...
+# [auth] student registered: s-8e3jrb@college.edu
+# [auth] student registered: s-tl9f3f@college.edu
+# Subtest: a student cannot view another student's order
+ok 114 - a student cannot view another student's order
+  ---
+  duration_ms: 390.7269
+  type: 'test'
+  ...
+# [auth] student registered: s-keabtl@college.edu
+# [auth] student registered: s-i3d2gv@college.edu
+# Subtest: students only ever see their own orders in the list
+ok 115 - students only ever see their own orders in the list
+  ---
+  duration_ms: 466.9777
+  type: 'test'
+  ...
+# [auth] student registered: s-9qbsy7@college.edu
+# Subtest: concurrent orders from the same user each get a correct total
+ok 116 - concurrent orders from the same user each get a correct total
+  ---
+  duration_ms: 263.2166
+  type: 'test'
+  ...
+# Subtest: malformed JSON returns 400 instead of a crash
+ok 117 - malformed JSON returns 400 instead of a crash
+  ---
+  duration_ms: 7.4875
+  type: 'test'
+  ...
+# Subtest: unknown routes return a JSON 404
+ok 118 - unknown routes return a JSON 404
+  ---
+  duration_ms: 6.3635
+  type: 'test'
+  ...
+# Subtest: every forward lifecycle transition is permitted for staff
+ok 119 - every forward lifecycle transition is permitted for staff
+  ---
+  duration_ms: 1443.8691
+  type: 'test'
+  ...
+# Subtest: skip-ahead transitions preserve the original admin workflow
+ok 120 - skip-ahead transitions preserve the original admin workflow
+  ---
+  duration_ms: 738.2919
+  type: 'test'
+  ...
+# Subtest: a Preparing order can be moved to Ready and then Completed
+ok 121 - a Preparing order can be moved to Ready and then Completed
+  ---
+  duration_ms: 286.9381
+  type: 'test'
+  ...
+# Subtest: an admin may reject a Pending or Accepted order with a reason
+ok 122 - an admin may reject a Pending or Accepted order with a reason
+  ---
+  duration_ms: 279.1459
+  type: 'test'
+  ...
+# Subtest: terminal states cannot be reopened through ordinary requests
+ok 123 - terminal states cannot be reopened through ordinary requests
+  ---
+  duration_ms: 342.1818
+  type: 'test'
+  ...
+# Subtest: backwards transitions are rejected
+ok 124 - backwards transitions are rejected
+  ---
+  duration_ms: 398.1396
+  type: 'test'
+  ...
+# Subtest: an order cannot transition to its current status
+ok 125 - an order cannot transition to its current status
+  ---
+  duration_ms: 178.005
+  type: 'test'
+  ...
+# Subtest: an admin cannot reject once preparation has started
+ok 126 - an admin cannot reject once preparation has started
+  ---
+  duration_ms: 179.3378
+  type: 'test'
+  ...
+# Subtest: a student can cancel their own Pending order
+ok 127 - a student can cancel their own Pending order
+  ---
+  duration_ms: 159.9538
+  type: 'test'
+  ...
+# Subtest: a student can cancel their own Accepted order
+ok 128 - a student can cancel their own Accepted order
+  ---
+  duration_ms: 312.6083
+  type: 'test'
+  ...
+# Subtest: cancellation is idempotent for the same owner
+ok 129 - cancellation is idempotent for the same owner
+  ---
+  duration_ms: 274.4017
+  type: 'test'
+  ...
+# Subtest: a student cannot cancel another student's order
+ok 130 - a student cannot cancel another student's order
+  ---
+  duration_ms: 446.7191
+  type: 'test'
+  ...
+# Subtest: staff may cancel another user's order, but must give a reason
+ok 131 - staff may cancel another user's order, but must give a reason
+  ---
+  duration_ms: 420.9857
+  type: 'test'
+  ...
+# Subtest: a student cannot cancel once preparation has begun
+ok 132 - a student cannot cancel once preparation has begun
+  ---
+  duration_ms: 358.0486
+  type: 'test'
+  ...
+# Subtest: an admin may cancel a Preparing order as the explicit exception
+ok 133 - an admin may cancel a Preparing order as the explicit exception
+  ---
+  duration_ms: 219.2575
+  type: 'test'
+  ...
+# Subtest: staff may not cancel a Preparing order even though admin can
+ok 134 - staff may not cancel a Preparing order even though admin can
+  ---
+  duration_ms: 180.6155
+  type: 'test'
+  ...
+# Subtest: a student cannot cancel completed or rejected orders
+ok 135 - a student cannot cancel completed or rejected orders
+  ---
+  duration_ms: 326.9345
+  type: 'test'
+  ...
+# Subtest: cancelling an already-cancelled order stays idempotent rather than erroring
+ok 136 - cancelling an already-cancelled order stays idempotent rather than erroring
+  ---
+  duration_ms: 177.6552
+  type: 'test'
+  ...
+# Subtest: a student cannot set order status directly
+ok 137 - a student cannot set order status directly
+  ---
+  duration_ms: 206.6146
+  type: 'test'
+  ...
+# Subtest: staff cannot reject an order
+ok 138 - staff cannot reject an order
+  ---
+  duration_ms: 160.7334
+  type: 'test'
+  ...
+# Subtest: an unauthenticated request cannot change an order
+ok 139 - an unauthenticated request cannot change an order
+  ---
+  duration_ms: 264.083
+  type: 'test'
+  ...
+# Subtest: rejection and administrative cancellation require a reason
+ok 140 - rejection and administrative cancellation require a reason
+  ---
+  duration_ms: 225.8596
+  type: 'test'
+  ...
+# Subtest: a student may cancel without supplying a reason
+ok 141 - a student may cancel without supplying a reason
+  ---
+  duration_ms: 163.7539
+  type: 'test'
+  ...
+# Subtest: malformed ids that reach the route are rejected with 400
+ok 142 - malformed ids that reach the route are rejected with 400
+  ---
+  duration_ms: 310.4635
+  type: 'test'
+  ...
+# Subtest: malformed status payloads are rejected with 400
+ok 143 - malformed status payloads are rejected with 400
+  ---
+  duration_ms: 165.8175
+  type: 'test'
+  ...
+# Subtest: a missing order returns 404 for both status and cancel
+ok 144 - a missing order returns 404 for both status and cancel
+  ---
+  duration_ms: 157.8987
+  type: 'test'
+  ...
+# Subtest: two conflicting transitions racing from the same state: exactly one wins
+ok 145 - two conflicting transitions racing from the same state: exactly one wins
+  ---
+  duration_ms: 460.2239
+  type: 'test'
+  ...
+# Subtest: two identical concurrent transitions: one wins, no duplicate audit entries
+ok 146 - two identical concurrent transitions: one wins, no duplicate audit entries
+  ---
+  duration_ms: 437.502
+  type: 'test'
+  ...
+# Subtest: a losing conflict response names the current state
+ok 147 - a losing conflict response names the current state
+  ---
+  duration_ms: 434.4177
+  type: 'test'
+  ...
+# Subtest: a concurrent cancel racing a status change cannot corrupt the record
+ok 148 - a concurrent cancel racing a status change cannot corrupt the record
+  ---
+  duration_ms: 306.2505
+  type: 'test'
+  ...
+# Subtest: each successful transition records from, to, actor, role, time and reason
+ok 149 - each successful transition records from, to, actor, role, time and reason
+  ---
+  duration_ms: 310.042
+  type: 'test'
+  ...
+# Subtest: a student cancellation records the student as the actor
+ok 150 - a student cancellation records the student as the actor
+  ---
+  duration_ms: 156.3174
+  type: 'test'
+  ...
+# Subtest: failed transitions never create audit entries
+ok 151 - failed transitions never create audit entries
+  ---
+  duration_ms: 316.7176
+  type: 'test'
+  ...
+# Subtest: legacy pre-Phase-2 order documents still load and remain usable
+ok 152 - legacy pre-Phase-2 order documents still load and remain usable
+  ---
+  duration_ms: 278.9588
+  type: 'test'
+  ...
+# Subtest: existing response fields and status filter remain backward compatible
+ok 153 - existing response fields and status filter remain backward compatible
+  ---
+  duration_ms: 253.4251
+  type: 'test'
+  ...
+# Subtest: a terminal order reports canCancel false
+ok 154 - a terminal order reports canCancel false
+  ---
+  duration_ms: 239.817
+  type: 'test'
+  ...
+# Subtest: the lifecycle map is the single source of truth for allowed transitions
+ok 155 - the lifecycle map is the single source of truth for allowed transitions
+  ---
+  duration_ms: 123.3816
+  type: 'test'
+  ...
+# Subtest: strict lifecycle mode requires each adjacent stage
+ok 156 - strict lifecycle mode requires each adjacent stage
+  ---
+  duration_ms: 0.9559
+  type: 'test'
+  ...
+# Subtest: the canonical lifecycle is walkable end to end
+ok 157 - the canonical lifecycle is walkable end to end
+  ---
+  duration_ms: 134.4894
+  type: 'test'
+  ...
+# [rate-limit] throttled auth from 127.0.0.1
+# Subtest: auth limiter returns 429 once the limit is exceeded
+ok 158 - auth limiter returns 429 once the limit is exceeded
+  ---
+  duration_ms: 55.0514
+  type: 'test'
+  ...
+# [rate-limit] throttled auth from 127.0.0.1
+# Subtest: throttled responses advertise the standard RateLimit headers
+ok 159 - throttled responses advertise the standard RateLimit headers
+  ---
+  duration_ms: 10.4144
+  type: 'test'
+  ...
+# [rate-limit] throttled auth from 127.0.0.1
+# Subtest: the limiter does not echo submitted credentials
+ok 160 - the limiter does not echo submitted credentials
+  ---
+  duration_ms: 9.957
+  type: 'test'
+  ...
+# Subtest: the limiter can be disabled programmatically
+ok 161 - the limiter can be disabled programmatically
+  ---
+  duration_ms: 18.2795
+  type: 'test'
+  ...
+# Real-time notifications enabled
+# Subtest: a socket connection without a token is rejected
+ok 162 - a socket connection without a token is rejected
+  ---
+  duration_ms: 691.2807
+  type: 'test'
+  ...
+# Subtest: a socket connection with an invalid or expired token is rejected
+ok 163 - a socket connection with an invalid or expired token is rejected
+  ---
+  duration_ms: 34.4863
+  type: 'test'
+  ...
+# Subtest: a token for a deleted account cannot open a socket
+ok 164 - a token for a deleted account cannot open a socket
+  ---
+  duration_ms: 234.6962
+  type: 'test'
+  ...
+# Subtest: a bare token (no Bearer prefix) is accepted, matching REST
+ok 165 - a bare token (no Bearer prefix) is accepted, matching REST
+  ---
+  duration_ms: 158.5501
+  type: 'test'
+  ...
+# Subtest: a student cannot subscribe to another student's order
+ok 166 - a student cannot subscribe to another student's order
+  ---
+  duration_ms: 309.9833
+  type: 'test'
+  ...
+# Subtest: a student can subscribe to their own order
+ok 167 - a student can subscribe to their own order
+  ---
+  duration_ms: 167.1971
+  type: 'test'
+  ...
+# Subtest: staff can subscribe to any order; the canteen board is staff only
+ok 168 - staff can subscribe to any order; the canteen board is staff only
+  ---
+  duration_ms: 427.2248
+  type: 'test'
+  ...
+# Subtest: subscribing with a malformed or unknown order id is refused
+ok 169 - subscribing with a malformed or unknown order id is refused
+  ---
+  duration_ms: 201.3399
+  type: 'test'
+  ...
+# Subtest: a successful transition notifies the order owner
+ok 170 - a successful transition notifies the order owner
+  ---
+  duration_ms: 515.7051
+  type: 'test'
+  ...
+# Subtest: the staff board receives events for every order
+ok 171 - the staff board receives events for every order
+  ---
+  duration_ms: 703.3868
+  type: 'test'
+  ...
+# Subtest: a student never receives another student's order events
+ok 172 - a student never receives another student's order events
+  ---
+  duration_ms: 949.8323
+  type: 'test'
+  ...
+# Subtest: cancellation emits an event to the owner
+ok 173 - cancellation emits an event to the owner
+  ---
+  duration_ms: 292.2812
+  type: 'test'
+  ...
+# Subtest: order creation notifies the owner's other sessions
+ok 174 - order creation notifies the owner's other sessions
+  ---
+  duration_ms: 284.9211
+  type: 'test'
+  ...
+# Subtest: payloads carry no order contents, only a notification
+ok 175 - payloads carry no order contents, only a notification
+  ---
+  duration_ms: 468.2523
+  type: 'test'
+  ...
+# Subtest: refused transitions emit no event
+ok 176 - refused transitions emit no event
+  ---
+  duration_ms: 1012.6928
+  type: 'test'
+  ...
+# Subtest: a validation failure that prevents a transition emits nothing
+ok 177 - a validation failure that prevents a transition emits nothing
+  ---
+  duration_ms: 697.0862
+  type: 'test'
+  ...
+# Subtest: a lost concurrency race emits exactly one event, for the winner
+ok 178 - a lost concurrency race emits exactly one event, for the winner
+  ---
+  duration_ms: 1010.6542
+  type: 'test'
+  ...
+# Subtest: concurrent cancels by the owner emit one notification
+ok 179 - concurrent cancels by the owner emit one notification
+  ---
+  duration_ms: 633.1767
+  type: 'test'
+  ...
+# Subtest: duplicate delivery across overlapping rooms is dedupable by eventId
+ok 180 - duplicate delivery across overlapping rooms is dedupable by eventId
+  ---
+  duration_ms: 758.1161
+  type: 'test'
+  ...
+# Subtest: a reconnecting client recovers missed changes from a fresh REST snapshot
+ok 181 - a reconnecting client recovers missed changes from a fresh REST snapshot
+  ---
+  duration_ms: 917.3172
+  type: 'test'
+  ...
+# Subtest: unsubscribing stops delivery for that order
+ok 182 - unsubscribing stops delivery for that order
+  ---
+  duration_ms: 892.5589
+  type: 'test'
+  ...
+# Subtest: REST endpoints keep working when no socket is connected
+ok 183 - REST endpoints keep working when no socket is connected
+  ---
+  duration_ms: 269.1517
+  type: 'test'
+  ...
+# Subtest: statusHistory keeps an exact total while bounding the stored array
+ok 184 - statusHistory keeps an exact total while bounding the stored array
+  ---
+  duration_ms: 294.6388
+  type: 'test'
+  ...
+# Subtest: seed:admin creates an admin account from environment variables
+ok 185 - seed:admin creates an admin account from environment variables
+  ---
+  duration_ms: 1201.8961
+  type: 'test'
+  ...
+# Subtest: seed:admin is idempotent when re-run
+ok 186 - seed:admin is idempotent when re-run
+  ---
+  duration_ms: 877.3554
+  type: 'test'
+  ...
+# Subtest: seed:admin can provision a staff account
+ok 187 - seed:admin can provision a staff account
+  ---
+  duration_ms: 442.7561
+  type: 'test'
+  ...
+# Subtest: seed:admin refuses to run without a password
+ok 188 - seed:admin refuses to run without a password
+  ---
+  duration_ms: 277.2622
+  type: 'test'
+  ...
+# Subtest: seed:admin rejects a short password and an invalid role
+ok 189 - seed:admin rejects a short password and an invalid role
+  ---
+  duration_ms: 513.8942
+  type: 'test'
+  ...
+# Subtest: generate:secret emits a strong secret and writes no file
+ok 190 - generate:secret emits a strong secret and writes no file
+  ---
+  duration_ms: 66.7927
+  type: 'test'
+  ...
+1..190
+# tests 190
+# suites 0
+# pass 190
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 19808.0989

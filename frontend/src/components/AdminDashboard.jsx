@@ -1,0 +1,487 @@
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { motion } from "framer-motion";
+import {
+  FaCheck,
+  FaTimes,
+  FaSpinner,
+  FaPlus,
+  FaTrash,
+  FaSignOutAlt,
+  FaFire,
+} from "react-icons/fa";
+import api from "../api";
+import { statusTone, requiresReason, ACTION_STYLE } from "../orderStatus";
+import { createRealtimeClient } from "../realtime";
+import InventoryPanel from "./InventoryPanel";
+
+/** Filter chips shown above the order board. */
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "Pending", label: "Pending" },
+  { key: "Accepted", label: "Accepted" },
+  { key: "Preparing", label: "Preparing" },
+  { key: "Ready", label: "Ready" },
+  { key: "Completed", label: "Completed" },
+  { key: "Cancelled", label: "Cancelled" },
+  { key: "Rejected", label: "Rejected" },
+];
+
+export default function AdminDashboard({ name, role = "admin", onLogout, onOpenKitchen }) {
+  const [orders, setOrders] = useState([]);
+  const [foods, setFoods] = useState([]);
+  const [newFood, setNewFood] = useState({ name: "", description: "", price: "", image: "" });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [liveStatus, setLiveStatus] = useState("connecting");
+  const [filter, setFilter] = useState("all");
+  // Orders that arrived while this board was open, for the alert strip.
+  const [newArrivals, setNewArrivals] = useState([]);
+
+  const canManageMenu = role === "admin" || role === "staff";
+  const knownOrderIds = useRef(new Set());
+
+  const refreshAllOrders = useCallback(async () => {
+    try {
+      const res = await api.get("/orders/all");
+      const incoming = res.data || [];
+
+      // Anything we have never seen is genuinely new to this board.
+      const seen = knownOrderIds.current;
+      if (seen.size > 0) {
+        const fresh = incoming.filter((o) => !seen.has(o._id));
+        if (fresh.length) {
+          setNewArrivals((prev) => [...fresh.map((o) => o._id), ...prev].slice(0, 20));
+        }
+      }
+      incoming.forEach((o) => seen.add(o._id));
+
+      setOrders(incoming);
+    } catch (err) {
+      setError(err.message || "Error fetching orders");
+    }
+  }, []);
+
+const refreshOrder = useCallback(async (orderId) => {
+    try {
+      const fresh = await api.get(`/orders/${orderId}`);
+      const seen = knownOrderIds.current;
+
+      // An order this board has never seen is genuinely new. It must be
+      // INSERTED, not just mapped over -- otherwise an order placed after the
+      // board loaded would stay invisible until a full refresh.
+      if (seen.size > 0 && !seen.has(orderId)) {
+        setNewArrivals((prev) => [orderId, ...prev.filter((x) => x !== orderId)].slice(0, 20));
+      }
+      seen.add(orderId);
+
+      setOrders((prev) => {
+        const exists = prev.some((o) => o._id === orderId);
+        return exists
+          ? prev.map((o) => (o._id === orderId ? fresh.data : o))
+          : [fresh.data, ...prev];
+      });
+    } catch {
+      /* a later full refresh will reconcile */
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchFoods = async () => {
+      try {
+        const res = await api.get("/food");
+        if (!cancelled) setFoods(res.data || []);
+      } catch (err) {
+        if (!cancelled) setError(err.message || "Error fetching food items");
+      }
+    };
+
+    Promise.all([refreshAllOrders(), fetchFoods()]).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshAllOrders]);
+
+  // Real-time board updates, with full resync after a reconnect.
+  useEffect(() => {
+    let wasDisconnected = false;
+    const client = createRealtimeClient({
+      onStatusChange: (status) => {
+        setLiveStatus(status);
+        if (status === "disconnected" || status === "error") wasDisconnected = true;
+        if ((status === "connected" || status === "reconnected") && wasDisconnected) {
+          wasDisconnected = false;
+          refreshAllOrders();
+        }
+      },
+      onOrderChanged: (event) => refreshOrder(event.orderId),
+    });
+    client.subscribeToCanteen();
+    return () => client.close();
+  }, [refreshOrder, refreshAllOrders]);
+
+  const updateStatus = async (id, status) => {
+    setError("");
+
+    let reason;
+    if (requiresReason(status)) {
+      const entered = window.prompt(
+        `Reason for marking this order "${status}" (required):`,
+        ""
+      );
+      if (entered === null) return;
+      if (!entered.trim()) {
+        setError(`A reason is required to mark an order "${status}".`);
+        return;
+      }
+      reason = entered.trim();
+    }
+
+    try {
+      const res = await api.put(`/orders/${id}/status`, { status, reason });
+      setOrders((prev) => prev.map((o) => (o._id === id ? res.data : o)));
+      setNewArrivals((prev) => prev.filter((oid) => oid !== id));
+    } catch (err) {
+      setError(err.message || "Failed to update status");
+      try {
+        const fresh = await api.get(`/orders/${id}`);
+        setOrders((prev) => prev.map((o) => (o._id === id ? fresh.data : o)));
+      } catch {
+        /* the error is already surfaced */
+      }
+    }
+  };
+
+  const addFood = async (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (!newFood.name || newFood.price === "") {
+      setError("Name and price are required.");
+      return;
+    }
+
+    try {
+      const res = await api.post("/food", { ...newFood, price: parseFloat(newFood.price) });
+      setFoods((prev) => [...prev, res.data]);
+      setNewFood({ name: "", description: "", price: "", image: "" });
+    } catch (err) {
+      setError(err.message || "Failed to add food");
+    }
+  };
+
+  const deleteFood = async (id) => {
+    setError("");
+    if (!window.confirm("Delete this menu item? This cannot be undone.")) return;
+
+    try {
+      await api.delete(`/food/${id}`);
+      setFoods((prev) => prev.filter((f) => f._id !== id));
+    } catch (err) {
+      setError(err.message || "Failed to delete food");
+    }
+  };
+
+  const visibleOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+
+  return (
+    <div className="p-8 bg-gradient-to-br from-purple-200 via-blue-100 to-green-200 min-h-screen">
+      <div className="flex justify-between items-center flex-wrap gap-3 mb-2">
+        <div className="flex items-center gap-3">
+          {onOpenKitchen && (
+            <button
+              type="button"
+              onClick={onOpenKitchen}
+              data-testid="open-kitchen"
+              className="flex items-center bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full shadow font-semibold"
+            >
+              <FaFire className="mr-2" /> Kitchen Display
+            </button>
+          )}
+          <span
+            className={`inline-flex items-center gap-2 text-xs px-3 py-1 rounded-full bg-white/80 shadow ${
+              liveStatus === "connected" ? "text-green-700" : "text-gray-500"
+            }`}
+            data-testid="admin-live"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                liveStatus === "connected" ? "bg-green-500" : "bg-gray-400"
+              }`}
+            />
+            {liveStatus === "connected" ? "Live" : "Offline"}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={refreshAllOrders}
+            data-testid="admin-refresh"
+            className="bg-white text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-full shadow font-semibold"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex items-center bg-white text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-full shadow font-semibold"
+          >
+            Logout
+          </button>
+        </div>
+      </div>
+
+      <motion.h1
+        initial={{ y: -50, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.7 }}
+        className="text-4xl font-extrabold mb-6 text-purple-800 text-center"
+      >
+        Welcome, {name}!
+      </motion.h1>
+
+      {error && (
+        <p role="alert" className="max-w-3xl mx-auto mb-4 text-center text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">
+          {error}
+        </p>
+      )}
+
+      {/* New-order alert strip */}
+      {newArrivals.length > 0 && (
+        <div
+          className="max-w-3xl mx-auto mb-4 bg-orange-50 border-2 border-orange-400 rounded-xl p-3 flex items-center justify-between gap-3"
+          data-testid="new-order-alert"
+          role="status"
+        >
+          <span className="text-sm font-semibold text-orange-800">
+            {newArrivals.length} new order{newArrivals.length > 1 ? "s" : ""} received
+          </span>
+          <button
+            type="button"
+            onClick={() => setNewArrivals([])}
+            className="text-orange-800 font-bold text-sm underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* ===== Inventory (administrators only) ===== */}
+      {role === "admin" && <InventoryPanel />}
+
+      {/* ===== Menu Management ===== */}
+      <h2 className="text-2xl font-bold mb-4 text-gray-800">Menu Management</h2>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="bg-white p-6 rounded-3xl shadow-2xl mb-8"
+      >
+        <form onSubmit={addFood} className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 mb-4">
+          <input
+            type="text"
+            placeholder="Name"
+            aria-label="Food name"
+            value={newFood.name}
+            onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
+            className="flex-1 p-2 border rounded"
+          />
+          <input
+            type="text"
+            placeholder="Description"
+            aria-label="Description"
+            value={newFood.description}
+            onChange={(e) => setNewFood({ ...newFood, description: e.target.value })}
+            className="flex-1 p-2 border rounded"
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            placeholder="Price"
+            aria-label="Price"
+            value={newFood.price}
+            onChange={(e) => setNewFood({ ...newFood, price: e.target.value })}
+            className="w-32 p-2 border rounded"
+          />
+          <input
+            type="text"
+            placeholder="Image URL"
+            aria-label="Image URL"
+            value={newFood.image}
+            onChange={(e) => setNewFood({ ...newFood, image: e.target.value })}
+            className="flex-1 p-2 border rounded"
+          />
+          <motion.button
+            type="submit"
+            disabled={!canManageMenu}
+            whileHover={{ scale: 1.05 }}
+            className="bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white font-bold py-2 px-4 rounded-full flex items-center shadow-md"
+          >
+            <FaPlus className="mr-2" /> Add Food
+          </motion.button>
+        </form>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {foods.length === 0 ? (
+            <p className="text-gray-500">No menu items yet.</p>
+          ) : (
+            foods.map((food) => (
+              <motion.div
+                key={food._id}
+                whileHover={{ scale: 1.03, rotate: 1 }}
+                className="bg-gray-50 p-4 rounded-2xl shadow-lg flex justify-between items-center gap-2"
+              >
+                <div>
+                  <h3 className="font-bold text-purple-700">{food.name}</h3>
+                  <p className="text-gray-500 text-sm">{food.description}</p>
+                  <p className="font-bold text-green-600">₹{food.price}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {food.category}
+                    {food.available === false ? " · unavailable" : ""}
+                    {food.stock !== null && food.stock !== undefined ? ` · stock ${food.stock}` : ""}
+                  </p>
+                </div>
+                {canManageMenu && (
+                  <button
+                    type="button"
+                    onClick={() => deleteFood(food._id)}
+                    aria-label={`Delete ${food.name}`}
+                    className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shrink-0"
+                  >
+                    <FaTrash />
+                  </button>
+                )}
+              </motion.div>
+            ))
+          )}
+        </div>
+      </motion.div>
+
+      {/* ===== Order Board ===== */}
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">
+          Orders ({visibleOrders.length})
+        </h2>
+
+        <div className="flex flex-wrap gap-2" data-testid="status-filters">
+          {FILTERS.map((f) => {
+            const count =
+              f.key === "all" ? orders.length : orders.filter((o) => o.status === f.key).length;
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                data-testid={`filter-${f.key}`}
+                aria-pressed={filter === f.key}
+                className={`px-3 py-1 rounded-full text-sm font-semibold shadow ${
+                  filter === f.key
+                    ? "bg-purple-600 text-white"
+                    : "bg-white text-gray-600 hover:bg-purple-50"
+                }`}
+              >
+                {f.label} ({count})
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-gray-500">Loading orders...</p>
+      ) : visibleOrders.length === 0 ? (
+        <p className="text-gray-500">
+          {orders.length === 0 ? "No orders yet." : `No ${filter} orders.`}
+        </p>
+      ) : (
+        <div className="space-y-6">
+          {visibleOrders.map((order) => (
+            <motion.div
+              key={order._id}
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              data-testid="admin-order-card"
+              data-order-id={order._id}
+              className={`bg-white p-6 rounded-3xl shadow-2xl border-l-8 border-purple-500 ${
+                newArrivals.includes(order._id) ? "ring-4 ring-orange-400" : ""
+              }`}
+            >
+              <div className="flex justify-between mb-2 gap-4">
+                <span className="font-bold text-purple-700 break-all">
+                  Order ID: {order._id}
+                </span>
+                <span
+                  data-testid="admin-order-status"
+                  className={`font-semibold ${statusTone(order.status)} flex items-center shrink-0`}
+                >
+                  {(order.status === "Pending" ||
+                    order.status === "Accepted" ||
+                    order.status === "Preparing") && (
+                    <FaSpinner className="animate-spin mr-1" />
+                  )}
+                  {order.status === "Completed" && <FaCheck className="mr-1" />}
+                  {order.status}
+                </span>
+              </div>
+
+              <p className="text-gray-500 text-sm mb-2">
+                Student: {order.student?.name || "Unknown"}
+                {order.student?.email ? ` (${order.student.email})` : ""}
+              </p>
+
+              {order.notes && (
+                <p className="text-sm text-yellow-900 bg-yellow-50 border border-yellow-300 rounded p-2 mb-2">
+                  <span className="font-bold">Note:</span> {order.notes}
+                </p>
+              )}
+
+              {(order.items || []).map((item, i) => (
+                <div key={`${item.food}-${i}`} className="flex justify-between text-gray-700 text-sm mb-1">
+                  <span>
+                    <span className="font-bold text-purple-700 mr-2">{item.quantity}×</span>
+                    {item.name}
+                  </span>
+                  <span>₹{item.price * item.quantity}</span>
+                </div>
+              ))}
+
+              <div className="flex justify-between font-bold text-purple-700 mt-2">
+                <span>Total:</span>
+                <span>₹{order.total}</span>
+              </div>
+
+              {order.allowedTransitions?.length ? (
+                <div className="mt-4 flex flex-wrap gap-3">
+                  {order.allowedTransitions.map((next) => (
+                    <motion.button
+                      key={next}
+                      type="button"
+                      data-testid={`status-${next}`}
+                      whileHover={{ scale: 1.05 }}
+                      className={`flex items-center ${ACTION_STYLE[next] || "bg-purple-500"} text-white font-bold py-1 px-3 rounded-full shadow-md`}
+                      onClick={() => updateStatus(order._id, next)}
+                    >
+                      {next === "Completed" && <FaCheck className="mr-2" />}
+                      {next === "Preparing" && <FaSpinner className="mr-2 animate-spin" />}
+                      {(next === "Cancelled" || next === "Rejected") && <FaTimes className="mr-2" />}
+                      {next}
+                    </motion.button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-gray-500">
+                  This order is {order.status.toLowerCase()} and can no longer be changed.
+                </p>
+              )}
+            </motion.div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

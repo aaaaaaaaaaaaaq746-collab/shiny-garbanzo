@@ -1,0 +1,92 @@
+﻿node.exe : [WebServer] (node:21676) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([WebServer] (no... env being set.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [e2e] in-memory MongoDB ready
+[WebServer] [e2e] seeded accounts
+[WebServer] [e2e] seeded menu
+[WebServer] Real-time notifications enabled
+[WebServer] [e2e] backend listening on http://127.0.0.1:5000 (realtime enabled)
+[WebServer] 
+[WebServer] > canteen-frontend@1.0.0 build
+[WebServer] > vite build
+[WebServer] 
+[WebServer] (node:11292) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] vite v5.4.21 building for production...
+[WebServer] transforming...
+[WebServer] [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline 
+data, please update: `npm i baseline-browser-mapping@latest -D`
+[WebServer] Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+[WebServer]   npx update-browserslist-db@latest
+[WebServer]   Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[WebServer] Γ£ô 516 modules transformed.
+[WebServer] rendering chunks...
+[WebServer] computing gzip size...
+[WebServer] dist/index.html                   0.46 kB Γöé gzip:   0.30 kB
+[WebServer] dist/assets/index-C7DZUSPI.css   22.98 kB Γöé gzip:   4.69 kB
+[WebServer] dist/assets/index-ByhUL_KW.js   395.87 kB Γöé gzip: 127.33 kB
+[WebServer] Γ£ô built in 1.42s
+[WebServer] (node:23712) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:28624) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer]   Γ₧£  Local:   http://127.0.0.1:4173/
+[WebServer] [baseline-browser-mapping] The data in this module is over two months old.  To ensure accurate Baseline 
+data, please update: `npm i baseline-browser-mapping@latest -D`
+
+Running 8 tests using 1 worker
+
+(node:26308) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [auth] student registered: e2e.inv1.1791642968186@college.edu
+  ok 1 e2e\inventory.spec.js:69:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ admin enables tracking, sets stock, and the student sees availability (3.5s)
+[WebServer] [auth] student registered: e2e.inv2.1791642968802@college.edu
+  x  2 e2e\inventory.spec.js:110:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ a stock adjustment with a reason updates the student menu (26.8s)
+(node:19184) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] [auth] student registered: e2e.inv1.1791642997954@college.edu
+  ok 3 e2e\inventory.spec.js:150:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ a student cannot order more than the available stock (1.1s)
+[WebServer] [auth] student registered: e2e.inv2.1791642999064@college.edu
+  ok 4 e2e\inventory.spec.js:179:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ an item drained to zero cannot be ordered and shows sold out (453ms)
+  ok 5 e2e\inventory.spec.js:213:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ low stock raises an alert, and acknowledging clears the 'new' badge (1.4s)
+  ok 6 e2e\inventory.spec.js:244:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ movement history is visible to an administrator (1.4s)
+  ok 7 e2e\inventory.spec.js:272:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ staff cannot see the inventory console (265ms)
+[WebServer] [auth] student registered: e2e.inv3.1791643002981@college.edu
+  ok 8 e2e\inventory.spec.js:287:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ inventory layouts remain usable on a mobile viewport (799ms)
+
+
+  1) e2e\inventory.spec.js:110:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ a stock adjustment with a reason updates the student menu 
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator:  getByTestId('food-card').filter({ hasText: 'Adjusted Item mv2hyq9e' }).getByTestId('availability-6aca4d58875c8e343c1a2a48')
+    Expected: "15 left available"
+    Received: "10 servings available"
+    Timeout:  25000ms
+
+    Call log:
+      - Expect "toHaveText" getByTestId('food-card').filter({ hasText: 'Adjusted Item mv2hyq9e' }).getByTestId('availability-6aca4d58875c8e343c1a2a48') with timeout 25000ms
+      - waiting for getByTestId('food-card').filter({ hasText: 'Adjusted Item mv2hyq9e' }).getByTestId('availability-6aca4d58875c8e343c1a2a48')
+        53 ├ù locator resolved to <p class="text-xs font-semibold mb-2 text-green-600" data-testid="availability-6aca4d58875c8e343c1a2a48">10 servings available</p>
+           - unexpected value "10 servings available"
+
+
+      139 |
+      140 |       // The student's card updates live over the socket, without a reload.
+    > 141 |       await expect(card.getByTestId(`availability-${food._id}`)).toHaveText("15 left available", {
+          |                                                                  ^
+      142 |         timeout: 25_000,
+      143 |       });
+      144 |     } finally {
+        at C:\Users\ankit\Desktop\minimproject\frontend\e2e\inventory.spec.js:141:66
+
+    Error Context: test-results\inventory-Phase-4-ΓÇö-invent-513c1-on-updates-the-student-menu\error-context.md
+
+  1 failed
+    e2e\inventory.spec.js:110:3 ΓÇ║ Phase 4 ΓÇö inventory ΓÇ║ a stock adjustment with a reason updates the student menu 
+  7 passed (44.7s)

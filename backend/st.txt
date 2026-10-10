@@ -1,0 +1,64 @@
+TAP version 13
+# Subtest: this deployment does NOT support transactions, as expected
+ok 1 - this deployment does NOT support transactions, as expected
+  ---
+  duration_ms: 386.8043
+  type: 'test'
+  ...
+# Subtest: withOptionalTransaction runs without a session on this topology
+ok 2 - withOptionalTransaction runs without a session on this topology
+  ---
+  duration_ms: 3.106
+  type: 'test'
+  ...
+# Subtest: concurrent orders cannot oversell without transactions
+ok 3 - concurrent orders cannot oversell without transactions
+  ---
+  duration_ms: 246.2665
+  type: 'test'
+  ...
+# Subtest: a failed multi-item order compensates cleanly without transactions
+ok 4 - a failed multi-item order compensates cleanly without transactions
+  ---
+  duration_ms: 127.663
+  type: 'test'
+  ...
+# Subtest: reserve, consume and release all work without transactions
+ok 5 - reserve, consume and release all work without transactions
+  ---
+  duration_ms: 252.5269
+  type: 'test'
+  ...
+# Subtest: cancelling before preparation releases exactly once without transactions
+ok 6 - cancelling before preparation releases exactly once without transactions
+  ---
+  duration_ms: 140.3941
+  type: 'test'
+  ...
+# Subtest: concurrent orders then concurrent cancels return the stock exactly once
+ok 7 - concurrent orders then concurrent cancels return the stock exactly once
+  ---
+  duration_ms: 184.4749
+  type: 'test'
+  ...
+# Subtest: counters never go negative under sustained concurrency
+ok 8 - counters never go negative under sustained concurrency
+  ---
+  duration_ms: 291.5906
+  type: 'test'
+  ...
+# Subtest: legacy untracked items are unaffected on a standalone deployment
+ok 9 - legacy untracked items are unaffected on a standalone deployment
+  ---
+  duration_ms: 117.2647
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2360.9943

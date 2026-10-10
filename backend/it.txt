@@ -1,0 +1,238 @@
+TAP version 13
+# Subtest: the test environment really supports transactions
+ok 1 - the test environment really supports transactions
+  ---
+  duration_ms: 650.2543
+  type: 'test'
+  ...
+# Subtest: existing food documents without inventory fields remain functional
+ok 2 - existing food documents without inventory fields remain functional
+  ---
+  duration_ms: 236.359
+  type: 'test'
+  ...
+# Subtest: a pre-Phase-4 item with stock 0 still behaves as sold out
+ok 3 - a pre-Phase-4 item with stock 0 still behaves as sold out
+  ---
+  duration_ms: 126.4549
+  type: 'test'
+  ...
+# Subtest: an untracked item is never limited by inventory
+ok 4 - an untracked item is never limited by inventory
+  ---
+  duration_ms: 133.8585
+  type: 'test'
+  ...
+# Subtest: inventory tracking can be enabled for an existing item
+ok 5 - inventory tracking can be enabled for an existing item
+  ---
+  duration_ms: 141.1254
+  type: 'test'
+  ...
+# Subtest: enabling tracking requires a starting stock quantity
+ok 6 - enabling tracking requires a starting stock quantity
+  ---
+  duration_ms: 130.1128
+  type: 'test'
+  ...
+# Subtest: a valid order reserves the correct stock quantity
+ok 7 - a valid order reserves the correct stock quantity
+  ---
+  duration_ms: 149.1831
+  type: 'test'
+  ...
+# Subtest: an order exceeding available stock is rejected and reserves nothing
+ok 8 - an order exceeding available stock is rejected and reserves nothing
+  ---
+  duration_ms: 123.6203
+  type: 'test'
+  ...
+# Subtest: a multi-item order fails completely when one tracked item is short
+ok 9 - a multi-item order fails completely when one tracked item is short
+  ---
+  duration_ms: 124.494
+  type: 'test'
+  ...
+# Subtest: reserving exactly the available quantity is allowed
+ok 10 - reserving exactly the available quantity is allowed
+  ---
+  duration_ms: 144.8651
+  type: 'test'
+  ...
+# Subtest: concurrent orders cannot oversell a tracked item
+ok 11 - concurrent orders cannot oversell a tracked item
+  ---
+  duration_ms: 220.0757
+  type: 'test'
+  ...
+# Subtest: concurrent larger orders cannot oversell either
+ok 12 - concurrent larger orders cannot oversell either
+  ---
+  duration_ms: 160.3146
+  type: 'test'
+  ...
+# Subtest: cancelling a Pending order releases stock exactly once
+ok 13 - cancelling a Pending order releases stock exactly once
+  ---
+  duration_ms: 170.4381
+  type: 'test'
+  ...
+# Subtest: rejecting an eligible order releases the outstanding reservation
+ok 14 - rejecting an eligible order releases the outstanding reservation
+  ---
+  duration_ms: 369.38
+  type: 'test'
+  ...
+# Subtest: starting preparation consumes the reservation exactly once
+ok 15 - starting preparation consumes the reservation exactly once
+  ---
+  duration_ms: 472.5337
+  type: 'test'
+  ...
+# Subtest: direct advancement to Ready or Completed still consumes stock once
+ok 16 - direct advancement to Ready or Completed still consumes stock once
+  ---
+  duration_ms: 465.38
+  type: 'test'
+  ...
+# Subtest: walking the full lifecycle consumes only once
+ok 17 - walking the full lifecycle consumes only once
+  ---
+  duration_ms: 545.1321
+  type: 'test'
+  ...
+# Subtest: repeated cancellation cannot release stock twice
+ok 18 - repeated cancellation cannot release stock twice
+  ---
+  duration_ms: 337.736
+  type: 'test'
+  ...
+# Subtest: repeated preparation-start requests consume stock only once
+ok 19 - repeated preparation-start requests consume stock only once
+  ---
+  duration_ms: 481.8849
+  type: 'test'
+  ...
+# Subtest: a replayed reservation is ignored via the ledger's unique operation id
+ok 20 - a replayed reservation is ignored via the ledger's unique operation id
+  ---
+  duration_ms: 270.4122
+  type: 'test'
+  ...
+# Subtest: cancelling during preparation does not restore consumed stock
+ok 21 - cancelling during preparation does not restore consumed stock
+  ---
+  duration_ms: 495.1381
+  type: 'test'
+  ...
+# Subtest: recoverable stock after a preparation cancellation needs an explicit adjustment
+ok 22 - recoverable stock after a preparation cancellation needs an explicit adjustment
+  ---
+  duration_ms: 542.9004
+  type: 'test'
+  ...
+# Subtest: manual stock adjustments require authorization and a reason
+ok 23 - manual stock adjustments require authorization and a reason
+  ---
+  duration_ms: 217.4603
+  type: 'test'
+  ...
+# Subtest: students and staff cannot perform inventory operations
+ok 24 - students and staff cannot perform inventory operations
+  ---
+  duration_ms: 538.5175
+  type: 'test'
+  ...
+# Subtest: negative, fractional and malformed adjustments are rejected
+ok 25 - negative, fractional and malformed adjustments are rejected
+  ---
+  duration_ms: 216.2838
+  type: 'test'
+  ...
+# Subtest: stock cannot be reduced below zero
+ok 26 - stock cannot be reduced below zero
+  ---
+  duration_ms: 169.2552
+  type: 'test'
+  ...
+# Subtest: invalid order quantities are still rejected before any reservation
+ok 27 - invalid order quantities are still rejected before any reservation
+  ---
+  duration_ms: 182.9523
+  type: 'test'
+  ...
+# Subtest: a failed multi-item order leaves no partial reservation or order
+ok 28 - a failed multi-item order leaves no partial reservation or order
+  ---
+  duration_ms: 175.8701
+  type: 'test'
+  ...
+# Subtest: the ledger accurately reflects every successful operation
+ok 29 - the ledger accurately reflects every successful operation
+  ---
+  duration_ms: 489.9163
+  type: 'test'
+  ...
+# Subtest: every ledger operation id is unique
+ok 30 - every ledger operation id is unique
+  ---
+  duration_ms: 659.6851
+  type: 'test'
+  ...
+# Subtest: an administrator can inspect movement history per item
+ok 31 - an administrator can inspect movement history per item
+  ---
+  duration_ms: 505.6657
+  type: 'test'
+  ...
+# Subtest: sold-out and low-stock conditions are reported correctly
+ok 32 - sold-out and low-stock conditions are reported correctly
+  ---
+  duration_ms: 194.7954
+  type: 'test'
+  ...
+# Subtest: low-stock alerts resolve once stock is restored and do not repeat
+ok 33 - low-stock alerts resolve once stock is restored and do not repeat
+  ---
+  duration_ms: 257.3093
+  type: 'test'
+  ...
+# Subtest: an out-of-stock tracked item cannot be ordered
+ok 34 - an out-of-stock tracked item cannot be ordered
+  ---
+  duration_ms: 169.9821
+  type: 'test'
+  ...
+# Subtest: the inventory report filters by search, category and state
+ok 35 - the inventory report filters by search, category and state
+  ---
+  duration_ms: 232.9049
+  type: 'test'
+  ...
+# Subtest: existing menu endpoints and order flow are unchanged
+ok 36 - existing menu endpoints and order flow are unchanged
+  ---
+  duration_ms: 197.9973
+  type: 'test'
+  ...
+# Subtest: tracked items do not change the order lifecycle or cancellation rules
+ok 37 - tracked items do not change the order lifecycle or cancellation rules
+  ---
+  duration_ms: 628.9401
+  type: 'test'
+  ...
+# Subtest: manual availability toggle remains separate from stock
+ok 38 - manual availability toggle remains separate from stock
+  ---
+  duration_ms: 338.4046
+  type: 'test'
+  ...
+1..38
+# tests 38
+# suites 0
+# pass 38
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12409.1432
