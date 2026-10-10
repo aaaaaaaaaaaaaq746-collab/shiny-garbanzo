@@ -16,7 +16,7 @@ Status key: **Done** (in the repo and verified as stated), **Done, unverified**
 | 1 | Security and stability hardening (M1) | **Done, unverified (DB)** | Items N1, N2 and N7 were open before this pass and are now fixed. See the Phase 1 table. |
 | 2 | Order lifecycle state machine and student cancellation | **Done, unverified (DB)** | See the Phase 2 table. Pure tests pass; DB tests are written but not executed here. |
 | 2.5 | Fix-all pass before Phase 3 (P2-R1, P2-R2, P1-N1/N2/N7/N13, P0-N9 to N12, N3 to N6) | **Done, unverified (DB)** | See the Fix-all table. |
-| 1-SX | Student experience (feature spec Phase 1): discovery, cart and checkout, tracking, account | **Done, unverified (DB and browser)** | See the Student-experience table below. Pure tests, frontend unit tests, build and SSR render pass. DB tests and browser checks were not run. |
+| 1-SX | Student experience (feature spec Phase 1): discovery, cart and checkout, tracking, account, live wait, pickup capacity, email and push | **Feature scope complete; verification pending** | Scope is built (see the Student-experience table and the CHANGELOG entry "Phase 1 remaining gaps"). Excluding testing, Phase 1 is complete. Not yet verified: DB-backed tests (no MongoDB binary here), browser checks, and real email and push delivery (needs SMTP and VAPID configuration). |
 | 3+ | Analytics and exports, payments, QR, PWA, recommendations | **Open** | Milestones M2–M8 in `docs/AUDIT.md` §7. Payments, QR and PWA scope need decisions (§8). Menu/cart UX, receipts, coupons and reviews were delivered under 1-SX. |
 
 ### Phase 1 — status detail
