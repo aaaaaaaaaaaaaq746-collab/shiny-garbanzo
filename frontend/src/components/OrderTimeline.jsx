@@ -1,5 +1,5 @@
 import React from "react";
-import { buildTimeline, statusBadge } from "../orderStatus";
+import { buildTimeline, statusBadge, statusLabel } from "../orderStatus";
 
 /**
  * Horizontal progress timeline for a single order.
@@ -14,7 +14,7 @@ export default function OrderTimeline({ status, className = "" }) {
     return (
       <div className={`flex items-center gap-2 ${className}`} data-testid="order-timeline">
         <span className={`text-xs font-semibold px-3 py-1 rounded-full ${statusBadge(outcome)}`}>
-          Order {outcome.toLowerCase()}
+          {statusLabel(outcome)}
         </span>
       </div>
     );
@@ -48,7 +48,7 @@ export default function OrderTimeline({ status, className = "" }) {
                 {i + 1}
               </span>
               <span className={`text-[10px] sm:text-xs whitespace-nowrap ${label}`}>
-                {step.status}
+                {statusLabel(step.status)}
               </span>
             </span>
             {i < steps.length - 1 && (

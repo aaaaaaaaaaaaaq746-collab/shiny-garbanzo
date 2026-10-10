@@ -8,8 +8,11 @@ import {
   FaTrash,
   FaSignOutAlt,
   FaFire,
+  FaEdit,
 } from "react-icons/fa";
 import api from "../api";
+import FoodDetailsFields from "./FoodDetailsFields";
+import { emptyFoodForm, foodToForm, formToPayload } from "../lib/foodForm";
 import { statusTone, requiresReason, ACTION_STYLE } from "../orderStatus";
 import { createRealtimeClient } from "../realtime";
 import InventoryPanel from "./InventoryPanel";
@@ -29,7 +32,9 @@ const FILTERS = [
 export default function AdminDashboard({ name, role = "admin", onLogout, onOpenKitchen }) {
   const [orders, setOrders] = useState([]);
   const [foods, setFoods] = useState([]);
-  const [newFood, setNewFood] = useState({ name: "", description: "", price: "", image: "" });
+  const [newFood, setNewFood] = useState(emptyFoodForm);
+  // Inline editor for one existing menu item: { id, form, error }.
+  const [edit, setEdit] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [liveStatus, setLiveStatus] = useState("connecting");
@@ -160,17 +165,40 @@ const refreshOrder = useCallback(async (orderId) => {
     e.preventDefault();
     setError("");
 
-    if (!newFood.name || newFood.price === "") {
-      setError("Name and price are required.");
+    let payload;
+    try {
+      payload = formToPayload(newFood);
+    } catch (err) {
+      setError(err.message);
       return;
     }
 
     try {
-      const res = await api.post("/food", { ...newFood, price: parseFloat(newFood.price) });
+      const res = await api.post("/food", payload);
       setFoods((prev) => [...prev, res.data]);
-      setNewFood({ name: "", description: "", price: "", image: "" });
+      setNewFood(emptyFoodForm());
     } catch (err) {
       setError(err.message || "Failed to add food");
+    }
+  };
+
+  const startEdit = (food) => setEdit({ id: food._id, form: foodToForm(food), error: "" });
+
+  const saveEdit = async () => {
+    if (!edit) return;
+    let payload;
+    try {
+      payload = formToPayload(edit.form);
+    } catch (err) {
+      setEdit({ ...edit, error: err.message });
+      return;
+    }
+    try {
+      const res = await api.put(`/food/${edit.id}`, payload);
+      setFoods((prev) => prev.map((f) => (f._id === edit.id ? res.data : f)));
+      setEdit(null);
+    } catch (err) {
+      setEdit((cur) => (cur ? { ...cur, error: err.message || "Failed to save changes" } : cur));
     }
   };
 
@@ -281,7 +309,8 @@ const refreshOrder = useCallback(async (orderId) => {
         animate={{ opacity: 1 }}
         className="bg-white p-6 rounded-3xl shadow-2xl mb-8"
       >
-        <form onSubmit={addFood} className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0 mb-4">
+        <form onSubmit={addFood} className="mb-4 space-y-4">
+        <div className="flex flex-col md:flex-row md:space-x-4 space-y-4 md:space-y-0">
           <input
             type="text"
             placeholder="Name"
@@ -324,13 +353,91 @@ const refreshOrder = useCallback(async (orderId) => {
           >
             <FaPlus className="mr-2" /> Add Food
           </motion.button>
+        </div>
+          <details className="bg-gray-50 rounded-xl p-3">
+            <summary className="cursor-pointer font-semibold text-purple-700">
+              More details (diet, prep time, allergens, add-ons)
+            </summary>
+            <div className="mt-3">
+              <FoodDetailsFields value={newFood} onChange={setNewFood} disabled={!canManageMenu} />
+            </div>
+          </details>
         </form>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {foods.length === 0 ? (
             <p className="text-gray-500">No menu items yet.</p>
           ) : (
-            foods.map((food) => (
+            foods.map((food) =>
+              edit && edit.id === food._id ? (
+                <form
+                  key={food._id}
+                  data-testid="food-edit-form"
+                  aria-label={`Edit ${food.name}`}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    saveEdit();
+                  }}
+                  className="md:col-span-3 bg-gray-50 p-4 rounded-2xl shadow-lg space-y-3"
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input
+                      type="text"
+                      aria-label="Edit name"
+                      value={edit.form.name}
+                      onChange={(e) => setEdit({ ...edit, form: { ...edit.form, name: e.target.value } })}
+                      className="w-full p-2 border rounded"
+                    />
+                    <input
+                      type="text"
+                      aria-label="Edit description"
+                      value={edit.form.description}
+                      onChange={(e) => setEdit({ ...edit, form: { ...edit.form, description: e.target.value } })}
+                      className="w-full p-2 border rounded"
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      aria-label="Edit price"
+                      value={edit.form.price}
+                      onChange={(e) => setEdit({ ...edit, form: { ...edit.form, price: e.target.value } })}
+                      className="w-full p-2 border rounded"
+                    />
+                    <input
+                      type="text"
+                      aria-label="Edit image URL"
+                      value={edit.form.image}
+                      onChange={(e) => setEdit({ ...edit, form: { ...edit.form, image: e.target.value } })}
+                      className="w-full p-2 border rounded"
+                    />
+                  </div>
+                  <FoodDetailsFields
+                    value={edit.form}
+                    onChange={(form) => setEdit({ ...edit, form })}
+                  />
+                  {edit.error && (
+                    <p role="alert" className="text-sm text-red-600">
+                      {edit.error}
+                    </p>
+                  )}
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setEdit(null)}
+                      className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-4 rounded-full"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="bg-purple-500 hover:bg-purple-600 text-white font-semibold py-2 px-4 rounded-full"
+                    >
+                      Save changes
+                    </button>
+                  </div>
+                </form>
+              ) : (
               <motion.div
                 key={food._id}
                 whileHover={{ scale: 1.03, rotate: 1 }}
@@ -342,22 +449,38 @@ const refreshOrder = useCallback(async (orderId) => {
                   <p className="font-bold text-green-600">₹{food.price}</p>
                   <p className="text-xs text-gray-400 mt-1">
                     {food.category}
+                    {food.dietary ? ` · ${food.dietary}` : ""}
+                    {food.featured ? " · featured" : ""}
+                    {Array.isArray(food.allergens) && food.allergens.length > 0
+                      ? ` · allergens: ${food.allergens.join(", ")}`
+                      : ""}
                     {food.available === false ? " · unavailable" : ""}
                     {food.stock !== null && food.stock !== undefined ? ` · stock ${food.stock}` : ""}
                   </p>
                 </div>
                 {canManageMenu && (
-                  <button
-                    type="button"
-                    onClick={() => deleteFood(food._id)}
-                    aria-label={`Delete ${food.name}`}
-                    className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full shrink-0"
-                  >
-                    <FaTrash />
-                  </button>
+                  <div className="flex flex-col gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => startEdit(food)}
+                      aria-label={`Edit ${food.name}`}
+                      className="bg-purple-500 hover:bg-purple-600 text-white p-2 rounded-full"
+                    >
+                      <FaEdit />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteFood(food._id)}
+                      aria-label={`Delete ${food.name}`}
+                      className="bg-red-500 hover:bg-red-600 text-white p-2 rounded-full"
+                    >
+                      <FaTrash />
+                    </button>
+                  </div>
                 )}
               </motion.div>
-            ))
+              )
+            )
           )}
         </div>
       </motion.div>

@@ -115,20 +115,25 @@ MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 |---|---|---|
 | Search, category, veg / non-veg, price range, availability, sort by price, popularity, rating | Done | `utils/discovery.js` (+ `studentDiscovery.test.js`); `GET /api/food`. |
 | Featured, bestselling and new badges | Done | `badgesFor` / `bestsellerIdSet`; the Bestseller badge is computed over the whole menu. |
-| Images, prep time, ingredients, allergens | Done | `FoodCard.jsx`; fields on `FoodItem`. |
+| Images, prep time, ingredients, allergens | Done | `FoodCard.jsx`; fields on `FoodItem`. Staff can now enter category, diet, prep time, featured, ingredients, allergens and add-ons, and edit existing items (`AdminDashboard.jsx`, `FoodDetailsFields.jsx`, `lib/foodForm.js`). `PUT /api/food/:id` now accepts `dietary`. |
 | Quantities, saved cart | Done | `src/lib/cart.js` (+ `tests/unit/cart.test.js`). |
 | Add-ons and special instructions | Done | `utils/pricing.js` `priceLine` (+ `studentPricing.test.js`). Add-on prices come from the menu. |
 | Pickup slots and estimated prep | Done | `utils/pickupSlots.js`; `GET /api/orders/slots`; the server rejects off-grid and closed times (`studentCheckout.test.js`). |
 | Itemized bill: discounts and charges | Done | `buildBill` (+ `studentPricing.test.js`); `POST /api/orders/quote`. |
 | Unavailable items blocked | Done | `services/checkout.js` returns 409. Stock-tracked items are counted across all lines. |
-| Status labels, timeline, timestamps, estimated wait, cancel eligibility, realtime | Done | `OrderCard.jsx`; `waitLabel`; `canCancel` from the server. Realtime kept. |
+| Status labels, timeline, timestamps, estimated wait, cancel eligibility, realtime | Done (wording) | Students read "Pending confirmation" and "Ready for pickup"; the stored values are unchanged (`statusLabel` in `orderStatus.js`). The kitchen board shares the timeline and shows the same wording. Estimated wait is set once, at placement, and is not recalculated as the kitchen progresses. |
 | Profile, password, favourites, reorder | Done | `PUT /api/auth/me` (phone); `POST /api/auth/me/password` (revokes other sessions); reorder merges lines. |
-| Reviews after completion | Done | `routes/reviews.js` (one per item per order, unique index, atomic average). |
-| History filters, receipts, notification preferences | Done | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`; preferences are editable in the UI. Notification delivery is not built. |
+| Reviews after completion | Done | `routes/reviews.js` (one per item per order, unique index, atomic average). Students can read written reviews from the food card (`ReviewsToggle` in `student/FoodCard.jsx`). |
+| History filters, receipts, notification preferences | Done (in-app only) | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`. `orderUpdates` gates the pickup alert and `sound` plays a chime (`lib/notify.js`). `promotions` has no effect yet because no promotions are sent. Email and push delivery are not built. |
 | Payments and refunds | **Not in scope** | The app records `paymentStatus` only. No money moves. See the open decisions. |
 
 The DB-backed tests for these routes are in `backend/test/studentFeatures.test.js`.
 They have not been run.
+
+Known gaps in this phase, stated plainly: the estimated wait is not recalculated
+during preparation; pickup slots have no capacity limit; no payments or refunds;
+no email or push notifications; the editor and reviews toggle were checked by
+server-side render only, not clicked in a browser.
 
 ## Known limitations (documented, not fixed)
 

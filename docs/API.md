@@ -273,8 +273,10 @@ not bestsellers. The New badge covers items created in the last
 is unchanged.
 
 Admin or staff may set on `POST /api/food` and `PUT /api/food/:id`:
-`featured` (boolean), `addOns` (up to 10 of `{ label, price }`, labels unique,
-price 0 to 1000), `ingredients` and `allergens` (up to 30 short strings each).
+`dietary` (one of `veg`, `non-veg`, `vegan`, `jain`, `egg`; `null` or `""` clears it,
+any other value is a 400), `featured` (boolean), `addOns` (up to 10 of
+`{ label, price }`, labels unique, price 0 to 1000), `ingredients` and `allergens`
+(up to 30 short strings each).
 Stock fields remain admin-only, as in section 7.
 
 ### 8.2 Price a cart: `POST /api/orders/quote`

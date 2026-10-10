@@ -86,3 +86,12 @@ test("badgesFor: new means created within the window; featured comes from the st
     isNew: false,
   });
 });
+
+test("parseDietary: known values pass, empty clears, anything else is a 400", () => {
+  assert.equal(discovery.parseDietary(undefined), undefined);
+  assert.equal(discovery.parseDietary(null), null);
+  assert.equal(discovery.parseDietary(""), null);
+  assert.equal(discovery.parseDietary("jain"), "jain");
+  assert.throws(() => discovery.parseDietary("keto"), (e) => e.statusCode === 400);
+  assert.throws(() => discovery.parseDietary({ $gt: "" }), (e) => e.statusCode === 400);
+});

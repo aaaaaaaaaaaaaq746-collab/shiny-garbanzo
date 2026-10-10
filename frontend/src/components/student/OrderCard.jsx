@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { statusTone } from "../../orderStatus";
+import { statusTone, statusLabel } from "../../orderStatus";
 import { formatMoney } from "../../lib/cart";
 import { waitLabel } from "../../lib/orderView";
 import OrderTimeline from "../OrderTimeline";
@@ -25,7 +25,7 @@ export default function OrderCard({ order, now, onCancel, onReorder, onReceipt, 
       <div className="flex justify-between mb-2 gap-4">
         <span className="font-bold text-purple-700 break-all">Order ID: {order._id}</span>
         <span data-testid="order-status" className={`font-semibold ${statusTone(order.status)}`}>
-          {order.status}
+          {statusLabel(order.status)}
         </span>
       </div>
 

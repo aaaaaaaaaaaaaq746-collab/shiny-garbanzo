@@ -123,8 +123,20 @@ function bestsellerIdSet(rankedFoods, count) {
   return ids;
 }
 
+/**
+ * Validate a dietary value on a write. null or "" clears it; any value outside
+ * the known list is a 400 (the schema would otherwise reject it with a 500-class
+ * validation error). `undefined` means "not supplied" and is returned as-is.
+ */
+function parseDietary(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  return v.oneOf(String(value), DIETARY, "dietary");
+}
+
 module.exports = {
   parseFoodQuery,
+  parseDietary,
   badgesFor,
   bestsellerIdSet,
   SORT_MAP,

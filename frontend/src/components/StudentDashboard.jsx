@@ -18,6 +18,13 @@ import {
 import { DEFAULT_FILTERS, applyClientFilters, foodQueryParams } from "../lib/menuFilters";
 import { DEFAULT_HISTORY, historyQueryParams } from "../lib/orderHistory";
 import { saveTextFile } from "../lib/download";
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  normalizePrefs,
+  playPickupTone,
+  shouldPlaySound,
+  shouldRaiseReadyAlert,
+} from "../lib/notify";
 import FoodCard from "./student/FoodCard";
 import MenuFilters from "./student/MenuFilters";
 import CartPanel from "./student/CartPanel";
@@ -56,6 +63,24 @@ export default function StudentDashboard({ name, onLogout }) {
   const [liveStatus, setLiveStatus] = useState("connecting");
   // Orders that just became Ready, surfaced as a pickup notification.
   const [readyAlerts, setReadyAlerts] = useState([]);
+  // Notification preferences: loaded once, updated from the Account panel.
+  const [prefs, setPrefs] = useState(DEFAULT_NOTIFICATION_PREFS);
+  const prefsRef = useRef(prefs);
+  useEffect(() => {
+    prefsRef.current = prefs;
+  }, [prefs]);
+  useEffect(() => {
+    let active = true;
+    api
+      .get("/auth/me")
+      .then((res) => {
+        if (active) setPrefs(normalizePrefs(res.data.notificationPrefs));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const [reviewOrderId, setReviewOrderId] = useState(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -193,8 +218,14 @@ export default function StudentDashboard({ name, onLogout }) {
       // A stock change alters what is orderable; re-read the menu.
       onInventoryChanged: () => refreshFoods(),
       onOrderChanged: (event) => {
-        // A transition into "Ready" is a pickup moment worth calling out.
-        if (event.status === "Ready" && event.previousStatus !== "Ready") {
+        // A transition into "Ready" is a pickup moment worth calling out,
+        // unless the student has turned order updates off.
+        if (
+          event.status === "Ready" &&
+          event.previousStatus !== "Ready" &&
+          shouldRaiseReadyAlert(prefsRef.current)
+        ) {
+          if (shouldPlaySound(prefsRef.current)) playPickupTone();
           setReadyAlerts((prev) =>
             prev.some((a) => a.orderId === event.orderId)
               ? prev
@@ -452,7 +483,7 @@ export default function StudentDashboard({ name, onLogout }) {
       )}
 
       <div className="mt-10">
-        <AccountPanel />
+        <AccountPanel onPrefsChange={setPrefs} />
       </div>
     </div>
   );

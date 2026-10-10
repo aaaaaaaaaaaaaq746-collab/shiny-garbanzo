@@ -9,7 +9,7 @@ const v = require("../utils/validators");
 const inventory = require("../services/inventory");
 const { UNITS } = require("../models/FoodItem");
 const config = require("../config");
-const { parseFoodQuery, badgesFor, bestsellerIdSet } = require("../utils/discovery");
+const { parseFoodQuery, parseDietary, badgesFor, bestsellerIdSet } = require("../utils/discovery");
 
 const router = express.Router();
 
@@ -148,7 +148,7 @@ router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
     payload.category = v.optionalString(body.category, { field: "category", max: 60 }) || "General";
   }
   if (body.available !== undefined) payload.available = v.boolean(body.available, "available");
-  if (body.dietary !== undefined) payload.dietary = body.dietary;
+  if (body.dietary !== undefined) payload.dietary = parseDietary(body.dietary);
   if (body.spicy !== undefined) payload.spicy = v.boolean(body.spicy, "spicy");
   if (body.prepTimeMinutes !== undefined) {
     payload.prepTimeMinutes = v.quantity(body.prepTimeMinutes, {
@@ -239,6 +239,7 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
       max: 240,
     });
   }
+  if (body.dietary !== undefined) food.dietary = parseDietary(body.dietary);
   if (body.featured !== undefined) food.featured = v.boolean(body.featured, "featured");
   if (body.addOns !== undefined) food.addOns = addOnList(body.addOns);
   if (body.ingredients !== undefined) food.ingredients = stringList(body.ingredients, { field: "ingredients" });

@@ -2,10 +2,66 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { FaShoppingCart, FaHeart, FaStar } from "react-icons/fa";
 import { formatMoney } from "../../lib/cart";
+import api from "../../api";
 
 /** Small coloured pill used for category, dietary and badge labels. */
 function Pill({ children, className }) {
   return <span className={`px-2 py-0.5 rounded-full text-xs ${className}`}>{children}</span>;
+}
+
+/**
+ * Written reviews for one item, loaded the first time the student asks. Only
+ * the rating, comment and date are shown; the server never sends who wrote them.
+ */
+function ReviewsToggle({ foodId }) {
+  const [open, setOpen] = useState(false);
+  const [reviews, setReviews] = useState(null);
+  const [error, setError] = useState("");
+
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && reviews === null) {
+      try {
+        const res = await api.get(`/reviews/food/${foodId}`);
+        setReviews(res.data.reviews || []);
+        setError("");
+      } catch (err) {
+        setError(err.message || "Could not load reviews");
+      }
+    }
+  };
+
+  return (
+    <div className="w-full mb-2">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={toggle}
+        data-testid="food-reviews-toggle"
+        className="text-xs text-purple-700 underline w-full text-center"
+      >
+        {open ? "Hide reviews" : "Read reviews"}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1 text-xs text-gray-600" data-testid="food-reviews">
+          {error && (
+            <p role="alert" className="text-red-600">
+              {error}
+            </p>
+          )}
+          {reviews && reviews.length === 0 && <p>No written reviews yet.</p>}
+          {reviews &&
+            reviews.slice(0, 5).map((r) => (
+              <p key={r.id}>
+                <span className="font-semibold text-amber-600">{"★".repeat(r.rating)}</span>
+                {r.comment ? ` ${r.comment}` : ""}
+              </p>
+            ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -95,6 +151,8 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
           "No ratings yet"
         )}
       </p>
+
+      {ratingCount > 0 && <ReviewsToggle foodId={food._id} />}
 
       {Array.isArray(food.allergens) && food.allergens.length > 0 && (
         <p className="text-xs text-red-700 text-center mb-1">Contains: {food.allergens.join(", ")}</p>

@@ -9,6 +9,24 @@
 /** Canonical forward path, in order. Mirrors utils/orderLifecycle.js. */
 export const FORWARD_PATH = ["Pending", "Accepted", "Preparing", "Ready", "Completed"];
 
+/**
+ * Student-facing wording. The STORED value is unchanged (the API and the kitchen
+ * board still use "Ready"); only the label a student reads is expanded.
+ */
+export const STATUS_LABEL = {
+  Pending: "Pending confirmation",
+  Accepted: "Accepted",
+  Preparing: "Preparing",
+  Ready: "Ready for pickup",
+  Completed: "Completed",
+  Cancelled: "Cancelled",
+  Rejected: "Rejected",
+};
+
+export function statusLabel(status) {
+  return STATUS_LABEL[status] || status;
+}
+
 export const STATUS_TONE = {
   Pending: "text-purple-700",
   Accepted: "text-indigo-600",

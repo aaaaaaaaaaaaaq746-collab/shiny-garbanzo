@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import api, { setToken } from "../../api";
+import { DEFAULT_NOTIFICATION_PREFS as DEFAULT_PREFS } from "../../lib/notify";
 
 const PREF_LABELS = [
   ["orderUpdates", "Order status updates"],
-  ["promotions", "Offers and promotions"],
+  ["promotions", "Offers and promotions (none are sent yet)"],
   ["sound", "Sound for pickup alerts"],
 ];
 
 /** Profile, notification preferences and password. */
-export default function AccountPanel() {
+export default function AccountPanel({ onPrefsChange }) {
   const [profile, setProfile] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [form, setForm] = useState({ name: "", phone: "" });
-  const [prefs, setPrefs] = useState({ orderUpdates: true, promotions: false, sound: true });
+  const [prefs, setPrefs] = useState(DEFAULT_PREFS);
   const [passwords, setPasswords] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -26,7 +27,9 @@ export default function AccountPanel() {
         if (!active) return;
         setProfile(res.data);
         setForm({ name: res.data.name || "", phone: res.data.phone || "" });
-        setPrefs((p) => ({ ...p, ...(res.data.notificationPrefs || {}) }));
+        const merged = { ...DEFAULT_PREFS, ...(res.data.notificationPrefs || {}) };
+        setPrefs(merged);
+        onPrefsChange?.(merged);
       })
       .catch((err) => {
         if (active) setLoadError(err.message || "Could not load your profile");
@@ -34,7 +37,7 @@ export default function AccountPanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [onPrefsChange]); // the dashboard passes a stable state setter
 
   const flash = (text) => {
     setMessage(text);
@@ -64,6 +67,7 @@ export default function AccountPanel() {
     setPrefs(next);
     try {
       await api.put("/auth/me", { notificationPrefs: { [key]: next[key] } });
+      onPrefsChange?.(next);
       flash("Preferences saved.");
     } catch (err) {
       setPrefs(prefs);

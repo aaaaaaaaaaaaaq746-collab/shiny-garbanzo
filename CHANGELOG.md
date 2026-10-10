@@ -186,6 +186,56 @@ MongoDB binary could be run here. The pure tests and build checks listed under "
 | Playwright | `npm run test:e2e` | Not run |
 | Browser | — | **Not performed** |
 
+## Student experience: Phase 1 gap closure (follow-up)
+
+A review against the feature spec found four gaps. This entry closes them, in
+code only. It is still unverified in a browser and against the database.
+
+### Fixed
+
+- **Staff could not enter the new menu fields.** The admin screen could only
+  create name, description, price and image. It now has a "More details" section
+  (category, diet, prep time, featured, ingredients, allergens, add-ons) and an
+  **Edit** button on each item. Edits go through `PUT /api/food/:id`. Validation is
+  in `frontend/src/lib/foodForm.js` (`formToPayload`), which rejects bad input before
+  any request is sent.
+- **`dietary` was not updatable.** `PUT /api/food/:id` ignored it, and `POST`
+  stored it unchecked. Both now go through `parseDietary` (`backend/utils/discovery.js`):
+  a known value is accepted, empty clears it, anything else is a 400.
+- **Notification preferences did nothing.** The dashboard now loads them and
+  applies them. `orderUpdates` off means no pickup alert. `sound` on plays a short
+  chime when an order becomes ready (`frontend/src/lib/notify.js`). The Account
+  panel reports changes back to the dashboard, so no reload is needed.
+- **Students could not read reviews.** The food card has a "Read reviews" toggle
+  that loads `GET /api/reviews/food/:id` the first time it is opened. It shows
+  rating, comment and date only.
+
+### Changed
+
+- Student-facing status wording: "Pending confirmation" and "Ready for pickup".
+  The stored values are unchanged (`Pending`, `Ready`). The kitchen board shares the
+  timeline component, so staff now see the same wording.
+- The promotions toggle is labelled "(none are sent yet)".
+
+### Still not done
+
+- Estimated wait is set once at placement and not recalculated.
+- Pickup slots have no capacity limit.
+- No payments or refunds, and no email or push notifications.
+- `promotions` has no effect because no promotions are sent.
+
+### Verification (this follow-up)
+
+| Check | Result |
+|---|---|
+| Backend pure suites (`lifecycleMatrix`, `sessionRules`, `studentCheckout`, `studentPricing`, `studentDiscovery`, `studentPure`) | 375 of 375 pass (includes new `parseDietary` test) |
+| Frontend unit (`npm run test:unit`) | 38 of 38 pass (13 new: `foodForm`, `notify`, status labels) |
+| `npx eslint .` | 0 errors, 3 warnings (pre-existing, `App.jsx` and `InventoryPanel.jsx`) |
+| `npx vite build` | Succeeds |
+| Server-side render (`/tmp` harness) | Admin screen, details fields, timeline wording, food card reviews toggle, and order card render as expected |
+| Database-backed tests (`studentFeatures.test.js` and the existing suites) | **Not run.** No MongoDB binary in this sandbox |
+| Browser and Playwright checks, including clicking the admin editor, the reviews toggle, and the chime | **Not run.** No browser in this sandbox |
+
 ## Student experience: Phase 1 of the feature spec (discovery, cart, tracking, account)
 
 Scope from the spec: discovery, cart and checkout, order tracking, and account.
