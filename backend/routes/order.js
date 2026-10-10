@@ -5,6 +5,7 @@ const config = require("../config");
 const {
   authMiddleware,
   adminOrStaffMiddleware,
+  kitchenAccessMiddleware,
 } = require("../middleware/authMiddleware");
 const ApiError = require("../utils/ApiError");
 const v = require("../utils/validators");
@@ -17,6 +18,8 @@ const { parseOrderHistoryQuery, buildHistoryFilter } = require("../utils/orderHi
 const slots = require("../utils/pickupSlots");
 const { slotKey } = require("../utils/pickupCapacity");
 const pickupCapacity = require("../services/pickupCapacity");
+const inventoryPlan = require("../utils/inventoryPlan");
+const { sortKitchenQueue } = require("../utils/kitchenPriority");
 const { refreshEstimates } = require("../services/kitchenEta");
 const { enqueueOrderNotification } = require("../services/notifications");
 const {
@@ -73,22 +76,12 @@ function parseReason(body, { required, what }) {
  * requests or duplicate real-time events cannot double-apply.
  */
 /**
- * Which inventory work a transition needs: "consume", "release" or null.
- *
- * Moving into preparation consumes the reservation. Cancelling or rejecting
- * before preparation releases it. Cancelling from Preparing or Ready releases
- * nothing, because the food was already consumed; stock is not restored
- * automatically.
+ * Which inventory work a transition needs: "consume", "release", "restock" or
+ * null. The rules are in utils/inventoryPlan.js; the deduction point comes from
+ * INVENTORY_DEDUCT_AT.
  */
 function inventoryKindFor({ from, to }) {
-  if (["Preparing", "Ready", "Completed"].includes(to)) return "consume";
-  if (
-    ["Cancelled", "Rejected"].includes(to) &&
-    !["Preparing", "Ready", "Completed"].includes(from)
-  ) {
-    return "release";
-  }
-  return null;
+  return inventoryPlan.inventoryActionFor({ from, to, deductAt: config.inventory.deductAt });
 }
 
 /**
@@ -110,6 +103,20 @@ async function runInventoryEffect({ kind, order, actor, reason }) {
       ).catch(() => {});
     }
     result = { consumed: consumed.length, released: 0 };
+  } else if (kind === "restock") {
+    const { restocked } = await inventory.restockOrder({ order, actor, reason });
+    if (restocked.length) {
+      await Order.updateOne(
+        { _id: order._id },
+        { $set: { "items.$[el].stockRestocked": true } },
+        {
+          arrayFilters: [
+            { "el.inventoryTracked": true, "el.stockConsumed": true, "el.stockRestocked": { $ne: true } },
+          ],
+        }
+      ).catch(() => {});
+    }
+    result = { consumed: 0, released: 0, restocked: restocked.length };
   } else if (kind === "release") {
     const { released } = await inventory.releaseOrder({ order, actor, reason });
     if (released.length) {
@@ -243,7 +250,7 @@ function decorate(order, user) {
 
   plain.canCancel = canCancel({ order: plain, user });
 
-  if (user && (user.role === "admin" || user.role === "staff")) {
+  if (user && ["admin", "staff", "kitchen"].includes(user.role)) {
     plain.allowedTransitions = allowedTransitions({
       from: plain.status,
       role: user.role,
@@ -267,6 +274,7 @@ function publicLine(line) {
     food: line.food,
     name: line.name,
     basePrice: line.basePrice,
+    variant: line.variant || null,
     addOns: line.addOns,
     unitPrice: line.price,
     quantity: line.quantity,
@@ -357,6 +365,7 @@ router.post("/", authMiddleware, async (req, res) => {
     name: l.name,
     price: l.price,
     basePrice: l.basePrice,
+    variant: l.variant || null,
     addOns: l.addOns,
     quantity: l.quantity,
     specialInstructions: l.specialInstructions,
@@ -527,9 +536,9 @@ router.get("/slots", authMiddleware, async (req, res) => {
  * `allowedTransitions` comes from the same lifecycle module the REST status
  * endpoint uses, so the KDS can never offer an action the API would reject.
  */
-router.get("/kitchen", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
+router.get("/kitchen", authMiddleware, kitchenAccessMiddleware, async (req, res) => {
   const orders = await Order.find({ status: { $in: KITCHEN_STATUSES } })
-    .sort({ date: 1 }) // oldest first = longest waiting at the top
+    .sort({ date: 1 })
     .populate("student", "name email");
 
   const now = Date.now();
@@ -540,7 +549,8 @@ router.get("/kitchen", authMiddleware, adminOrStaffMiddleware, async (req, res) 
     return plain;
   });
 
-  res.json(feed);
+  // Rush first, then the order due soonest (pickup time, else ready estimate).
+  res.json(sortKitchenQueue(feed));
 });
 /**
  * Plain-text receipt for one order. Owner or staff only.
@@ -553,7 +563,7 @@ router.get("/:id/receipt", authMiddleware, async (req, res) => {
   const order = await Order.findById(id);
   if (!order) throw ApiError.notFound("Order not found");
 
-  const isStaff = ["admin", "staff"].includes(req.user.role);
+  const isStaff = ["admin", "staff", "kitchen"].includes(req.user.role);
   if (!isStaff && order.student.toString() !== req.user._id.toString()) {
     throw ApiError.forbidden("You can only view receipts for your own orders");
   }
@@ -573,7 +583,7 @@ router.get("/:id", authMiddleware, async (req, res) => {
   const order = await Order.findById(id).populate("student", "name email");
   if (!order) throw ApiError.notFound("Order not found");
 
-  const isStaff = ["admin", "staff"].includes(req.user.role);
+  const isStaff = ["admin", "staff", "kitchen"].includes(req.user.role);
   if (!isStaff && order.student._id?.toString() !== req.user._id.toString()) {
     throw ApiError.forbidden("You can only view your own orders");
   }
@@ -581,13 +591,47 @@ router.get("/:id", authMiddleware, async (req, res) => {
 });
 
 /**
- * Update order status (admin/staff).
+ * Mark an open order rush or normal on the kitchen display.
+ *
+ * Kitchen, staff and admin only. This is not a lifecycle transition: the
+ * status and its history are untouched. Closed orders cannot be re-prioritised.
+ */
+router.put("/:id/priority", authMiddleware, kitchenAccessMiddleware, async (req, res) => {
+  const id = v.objectId(req.params.id, "order id");
+  const body = v.object(req.body);
+  const priority = v.oneOf(body.priority, ["normal", "rush"], "priority");
+
+  const updated = await Order.findOneAndUpdate(
+    { _id: id, status: { $in: KITCHEN_STATUSES } },
+    { $set: { priority } },
+    { new: true }
+  );
+  if (!updated) {
+    const exists = await Order.exists({ _id: id });
+    if (!exists) throw ApiError.notFound("Order not found");
+    throw ApiError.conflict("Only open orders can be marked rush or normal");
+  }
+
+  emitOrderUpdate({
+    orderId: updated._id,
+    studentId: updated.student,
+    status: updated.status,
+    previousStatus: updated.status,
+    at: new Date(),
+  });
+  await afterQueueChange();
+  res.json(decorate(updated, req.user));
+});
+
+/**
+ * Update order status (admin/staff, and kitchen for the kitchen steps only).
+ *
  *
  * Arbitrary status assignment is impossible: the requested status is checked
  * against the centralized lifecycle map for the actor's role, and the state is
  * re-verified atomically inside the update itself.
  */
-router.put("/:id/status", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
+router.put("/:id/status", authMiddleware, kitchenAccessMiddleware, async (req, res) => {
   const id = v.objectId(req.params.id, "order id");
   const body = v.object(req.body);
 

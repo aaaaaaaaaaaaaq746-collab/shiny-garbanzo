@@ -9,6 +9,7 @@
 
 const ApiError = require("./ApiError");
 const v = require("./validators");
+const { effectiveUnitPrice } = require("./menuSchedule");
 
 const MAX_ADDONS_PER_LINE = 10;
 const MAX_INSTRUCTIONS_LENGTH = 140;
@@ -19,7 +20,14 @@ const MAX_INSTRUCTIONS_LENGTH = 140;
  * `addOnLabels` must each match an add-on defined on the menu item. Prices are
  * taken from the menu item, never from the request.
  */
-function priceLine({ food, quantity, addOnLabels = [], specialInstructions = null }) {
+function priceLine({
+  food,
+  quantity,
+  addOnLabels = [],
+  specialInstructions = null,
+  variantLabel = null,
+  nowMs = Date.now(),
+}) {
   const definedAddOns = Array.isArray(food.addOns) ? food.addOns : [];
 
   if (!Array.isArray(addOnLabels)) {
@@ -53,13 +61,16 @@ function priceLine({ food, quantity, addOnLabels = [], specialInstructions = nul
     );
   }
 
-  const basePrice = v.roundMoney(food.price);
+  // The base price is the item's price, or its sale price while a sale runs,
+  // or the chosen size's price. See utils/menuSchedule.js.
+  const basePrice = effectiveUnitPrice(food, variantLabel, nowMs);
   const addOnsTotal = v.roundMoney(addOns.reduce((sum, a) => sum + a.price, 0));
   const unitPrice = v.roundMoney(basePrice + addOnsTotal);
 
   return {
     food: food._id,
     name: food.name,
+    variant: variantLabel || null,
     basePrice,
     addOns,
     addOnsTotal,

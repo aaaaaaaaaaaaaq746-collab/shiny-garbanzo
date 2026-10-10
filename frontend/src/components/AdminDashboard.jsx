@@ -10,13 +10,20 @@ import {
   FaFire,
   FaEdit,
 } from "react-icons/fa";
-import api from "../api";
+import api, { assetUrl } from "../api";
 import FoodDetailsFields from "./FoodDetailsFields";
-import { emptyFoodForm, foodToForm, formToPayload } from "../lib/foodForm";
+import { emptyFoodForm, foodToForm, formToPayload, formToMenuPayload } from "../lib/foodForm";
+import { servingSummary } from "../lib/mealPeriods";
+import { IMAGE_TYPES, uploadMenuImage } from "../lib/menuImage";
 import { statusTone, requiresReason, ACTION_STYLE } from "../orderStatus";
 import { createRealtimeClient } from "../realtime";
 import InventoryPanel from "./InventoryPanel";
 import AnnouncementPanel from "./AnnouncementPanel";
+import OverviewPanel from "./OverviewPanel";
+import AnalyticsPanel from "./AnalyticsPanel";
+import CouponPanel from "./CouponPanel";
+import StaffPanel from "./StaffPanel";
+import MenuImageInput from "./MenuImageInput";
 
 /** Filter chips shown above the order board. */
 const FILTERS = [
@@ -28,6 +35,21 @@ const FILTERS = [
   { key: "Completed", label: "Completed" },
   { key: "Cancelled", label: "Cancelled" },
   { key: "Rejected", label: "Rejected" },
+];
+
+/**
+ * Sections of the admin dashboard. Staff see the order board and the menu;
+ * everything else is for administrators.
+ */
+const ADMIN_TABS = [
+  { key: "overview", label: "Overview", adminOnly: true },
+  { key: "orders", label: "Orders" },
+  { key: "menu", label: "Menu" },
+  { key: "inventory", label: "Inventory", adminOnly: true },
+  { key: "analytics", label: "Analytics", adminOnly: true },
+  { key: "coupons", label: "Coupons", adminOnly: true },
+  { key: "staff", label: "Staff", adminOnly: true },
+  { key: "announcements", label: "Announcements", adminOnly: true },
 ];
 
 export default function AdminDashboard({ name, role = "admin", onLogout, onOpenKitchen }) {
@@ -42,6 +64,10 @@ export default function AdminDashboard({ name, role = "admin", onLogout, onOpenK
   const [filter, setFilter] = useState("all");
   // Orders that arrived while this board was open, for the alert strip.
   const [newArrivals, setNewArrivals] = useState([]);
+  // Which section of the dashboard is showing.
+  const [tab, setTab] = useState("orders");
+  // Photo chosen for a new menu item; uploaded once the item is saved.
+  const [newFoodImage, setNewFoodImage] = useState(null);
 
   const canManageMenu = role === "admin" || role === "staff";
   const knownOrderIds = useRef(new Set());
@@ -168,16 +194,24 @@ const refreshOrder = useCallback(async (orderId) => {
 
     let payload;
     try {
-      payload = formToPayload(newFood);
+      payload = { ...formToPayload(newFood), ...formToMenuPayload(newFood) };
     } catch (err) {
       setError(err.message);
       return;
     }
 
     try {
-      const res = await api.post("/food", payload);
-      setFoods((prev) => [...prev, res.data]);
+      let created = (await api.post("/food", payload)).data;
+      if (newFoodImage) {
+        try {
+          created = await uploadMenuImage(created._id, newFoodImage);
+        } catch (err) {
+          setError(`The item was saved, but the photo failed: ${err.message}`);
+        }
+      }
+      setFoods((prev) => [...prev, created]);
       setNewFood(emptyFoodForm());
+      setNewFoodImage(null);
     } catch (err) {
       setError(err.message || "Failed to add food");
     }
@@ -189,7 +223,7 @@ const refreshOrder = useCallback(async (orderId) => {
     if (!edit) return;
     let payload;
     try {
-      payload = formToPayload(edit.form);
+      payload = { ...formToPayload(edit.form), ...formToMenuPayload(edit.form) };
     } catch (err) {
       setEdit({ ...edit, error: err.message });
       return;
@@ -215,7 +249,29 @@ const refreshOrder = useCallback(async (orderId) => {
     }
   };
 
+  /**
+   * Temporary sold-out (`until` = ISO time) or back on the menu (`until` = null).
+   * Staff and administrators both use this; the server clears it on its own.
+   */
+  const setSoldOut = async (food, until) => {
+    setError("");
+    try {
+      const res = await api.put(`/food/${food._id}`, { soldOutUntil: until });
+      setFoods((prev) => prev.map((f) => (f._id === food._id ? res.data : f)));
+    } catch (err) {
+      setError(err.message || "Could not change availability");
+    }
+  };
+
+  /** The end of today on this computer's clock: the default sold-out window. */
+  const endOfToday = () => {
+    const d = new Date();
+    d.setHours(24, 0, 0, 0);
+    return d.toISOString();
+  };
+
   const visibleOrders = filter === "all" ? orders : orders.filter((o) => o.status === filter);
+  const visibleTabs = ADMIN_TABS.filter((t) => !t.adminOnly || role === "admin");
 
   return (
     <div className="p-8 bg-gradient-to-br from-purple-200 via-blue-100 to-green-200 min-h-screen">
@@ -300,13 +356,44 @@ const refreshOrder = useCallback(async (orderId) => {
         </div>
       )}
 
+      {/* ===== Section tabs ===== */}
+      <nav aria-label="Dashboard sections" className="max-w-5xl mx-auto mb-6 flex flex-wrap justify-center gap-2" data-testid="admin-tabs">
+        {visibleTabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            data-testid={`tab-${t.key}`}
+            aria-pressed={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 rounded-full text-sm font-semibold shadow ${
+              tab === t.key ? "bg-purple-600 text-white" : "bg-white text-purple-700 hover:bg-purple-50"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "overview" && role === "admin" && <OverviewPanel orders={orders} onGoTo={setTab} />}
+
       {/* ===== Inventory (administrators only) ===== */}
-      {role === "admin" && <InventoryPanel />}
+      {tab === "inventory" && role === "admin" && <InventoryPanel />}
+
+      {/* ===== Analytics (administrators only) ===== */}
+      {tab === "analytics" && role === "admin" && <AnalyticsPanel />}
+
+      {/* ===== Coupons (administrators only) ===== */}
+      {tab === "coupons" && role === "admin" && <CouponPanel />}
+
+      {/* ===== Staff accounts (administrators only) ===== */}
+      {tab === "staff" && role === "admin" && <StaffPanel />}
 
       {/* ===== Announcements (administrators only) ===== */}
-      {role === "admin" && <AnnouncementPanel />}
+      {tab === "announcements" && role === "admin" && <AnnouncementPanel />}
 
       {/* ===== Menu Management ===== */}
+      {tab === "menu" && (
+      <>
       <h2 className="text-2xl font-bold mb-4 text-gray-800">Menu Management</h2>
       <motion.div
         initial={{ opacity: 0 }}
@@ -348,6 +435,14 @@ const refreshOrder = useCallback(async (orderId) => {
             value={newFood.image}
             onChange={(e) => setNewFood({ ...newFood, image: e.target.value })}
             className="flex-1 p-2 border rounded"
+          />
+          <input
+            type="file"
+            accept={IMAGE_TYPES.join(",")}
+            aria-label="Menu photo file"
+            disabled={!canManageMenu}
+            onChange={(e) => setNewFoodImage(e.target.files?.[0] || null)}
+            className="text-xs"
           />
           <motion.button
             type="submit"
@@ -420,6 +515,14 @@ const refreshOrder = useCallback(async (orderId) => {
                     value={edit.form}
                     onChange={(form) => setEdit({ ...edit, form })}
                   />
+                  <MenuImageInput
+                    foodId={edit.id}
+                    disabled={!canManageMenu}
+                    onUploaded={(updated) => {
+                      setFoods((prev) => prev.map((f) => (f._id === updated._id ? updated : f)));
+                      setEdit((cur) => (cur ? { ...cur, form: { ...cur.form, image: updated.image || "" } } : cur));
+                    }}
+                  />
                   {edit.error && (
                     <p role="alert" className="text-sm text-red-600">
                       {edit.error}
@@ -448,6 +551,9 @@ const refreshOrder = useCallback(async (orderId) => {
                 className="bg-gray-50 p-4 rounded-2xl shadow-lg flex justify-between items-center gap-2"
               >
                 <div>
+                  {food.image && (
+                    <img src={assetUrl(food.image)} alt="" className="w-20 h-20 object-cover rounded mb-2" />
+                  )}
                   <h3 className="font-bold text-purple-700">{food.name}</h3>
                   <p className="text-gray-500 text-sm">{food.description}</p>
                   <p className="font-bold text-green-600">₹{food.price}</p>
@@ -461,9 +567,44 @@ const refreshOrder = useCallback(async (orderId) => {
                     {food.available === false ? " · unavailable" : ""}
                     {food.stock !== null && food.stock !== undefined ? ` · stock ${food.stock}` : ""}
                   </p>
+                  <p className="text-xs text-gray-500">Served: {servingSummary(food)}</p>
+                  {food.subcategory && <p className="text-xs text-gray-500">Sub-category: {food.subcategory}</p>}
+                  {food.salePrice != null && (
+                    <p className="text-xs text-rose-600">
+                      Sale ₹{food.salePrice}
+                      {food.saleEndsAt ? ` until ${new Date(food.saleEndsAt).toLocaleString()}` : ""}
+                    </p>
+                  )}
+                  {Array.isArray(food.variants) && food.variants.length > 0 && (
+                    <p className="text-xs text-gray-600">
+                      Sizes: {food.variants.map((x) => `${x.label} ₹${x.price}`).join(" · ")}
+                    </p>
+                  )}
+                  {food.soldOutUntil && new Date(food.soldOutUntil) > new Date() && (
+                    <p className="text-xs font-semibold text-red-600">
+                      Sold out until {new Date(food.soldOutUntil).toLocaleString()}
+                    </p>
+                  )}
                 </div>
                 {canManageMenu && (
                   <div className="flex flex-col gap-2 shrink-0">
+                    {food.soldOutUntil && new Date(food.soldOutUntil) > new Date() ? (
+                      <button
+                        type="button"
+                        onClick={() => setSoldOut(food, null)}
+                        className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1 rounded-full"
+                      >
+                        Back on menu
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSoldOut(food, endOfToday())}
+                        className="bg-amber-500 hover:bg-amber-600 text-white text-xs px-2 py-1 rounded-full"
+                      >
+                        Sold out today
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => startEdit(food)}
@@ -489,7 +630,12 @@ const refreshOrder = useCallback(async (orderId) => {
         </div>
       </motion.div>
 
+      </>
+      )}
+
       {/* ===== Order Board ===== */}
+      {tab === "orders" && (
+      <>
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <h2 className="text-2xl font-bold text-gray-800">
           Orders ({visibleOrders.length})
@@ -608,6 +754,8 @@ const refreshOrder = useCallback(async (orderId) => {
             </motion.div>
           ))}
         </div>
+      )}
+      </>
       )}
     </div>
   );

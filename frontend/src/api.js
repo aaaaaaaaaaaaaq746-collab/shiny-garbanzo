@@ -8,8 +8,9 @@ import axios from "axios";
  * VITE_API_URL (see .env.example), so deploying against another host does not
  * require editing source.
  */
-const API_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000";
+// Empty by default: requests are same-origin and the Vite dev server proxies
+// /api and /uploads to the backend. Set VITE_API_URL for a separate API host.
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 export const TOKEN_KEY = "token";
 
@@ -65,5 +66,16 @@ api.interceptors.response.use(
     return Promise.reject({ message, status });
   }
 );
+
+/**
+ * Full URL for a file the API serves (for example an uploaded menu photo).
+ * Absolute URLs pass through unchanged; anything else is returned as-is.
+ */
+export function assetUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path;
+  if (path.startsWith("/uploads/")) return `${API_URL}${path}`;
+  return path;
+}
 
 export default api;

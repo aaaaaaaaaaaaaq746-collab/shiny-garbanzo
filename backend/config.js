@@ -7,6 +7,16 @@
  * contains no secrets of its own.
  */
 
+const path = require("path");
+const { normalizeDeductAt } = require("./utils/inventoryPlan");
+const { MENU_PERIOD_KEYS, DEFAULT_MENU_PERIODS } = require("./utils/menuSchedule");
+
+/** "HH:MM" from env, or the fallback when unset or malformed. */
+function clockEnv(name, fallback) {
+  const raw = process.env[name];
+  return raw && /^([01]\d|2[0-3]):[0-5]\d$/.test(raw) ? raw : fallback;
+}
+
 const WEAK_SECRETS = new Set([
   "canteensecret123",
   "secret",
@@ -114,6 +124,19 @@ const config = {
     name: process.env.CANTEEN_NAME || "College Canteen",
     // Offset from UTC in minutes for slot boundaries. 330 = India (IST).
     utcOffsetMinutes: envInt("CANTEEN_UTC_OFFSET_MINUTES", 330),
+    // Meal periods in canteen-local time, e.g. MENU_LUNCH_FROM=11:30.
+    menuPeriods: Object.fromEntries(
+      MENU_PERIOD_KEYS.map((key) => {
+        const base = key.toUpperCase();
+        return [
+          key,
+          {
+            from: clockEnv(`MENU_${base}_FROM`, DEFAULT_MENU_PERIODS[key].from),
+            to: clockEnv(`MENU_${base}_TO`, DEFAULT_MENU_PERIODS[key].to),
+          },
+        ];
+      })
+    ),
     openHour: envInt("CANTEEN_OPEN_HOUR", 9),
     closeHour: envInt("CANTEEN_CLOSE_HOUR", 18),
     slotMinutes: envInt("PICKUP_SLOT_MINUTES", 15),
@@ -128,6 +151,20 @@ const config = {
     slotCapacity: envInt("PICKUP_SLOT_CAPACITY", 20),
   },
 
+  // Inventory. Stock is always reserved at placement; this sets when the
+  // units are physically deducted: "preparing" (default) or "accepted".
+  inventory: {
+    deductAt: normalizeDeductAt(process.env.INVENTORY_DEDUCT_AT),
+  },
+  // Menu image uploads are stored on local disk. See routes/food.js.
+  uploads: {
+    // Relative paths are resolved from the backend folder.
+    dir: process.env.UPLOAD_DIR ? path.resolve(__dirname, process.env.UPLOAD_DIR) : path.join(__dirname, "uploads"),
+    maxBytes: Math.min(
+      Math.max(envInt("UPLOAD_MAX_BYTES", 2 * 1024 * 1024), 64 * 1024),
+      5 * 1024 * 1024
+    ),
+  },
   // Kitchen queue model used to estimate when each order will be ready.
   kitchen: {
     // How many orders the kitchen works on at the same time.

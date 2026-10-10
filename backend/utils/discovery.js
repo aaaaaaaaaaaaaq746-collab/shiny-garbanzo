@@ -7,6 +7,7 @@
 
 const ApiError = require("./ApiError");
 const v = require("./validators");
+const { MENU_PERIOD_KEYS } = require("./menuSchedule");
 
 /** Dietary values that count as vegetarian for the Veg / Non-veg filter. */
 const VEG_VALUES = ["veg", "vegan", "jain"];
@@ -43,6 +44,18 @@ function parseFoodQuery(query = {}) {
 
   const category = v.optionalString(query.category, { field: "category", max: 60 });
   if (category) filter.category = category;
+
+  const subcategory = v.optionalString(query.subcategory, { field: "subcategory", max: 60 });
+  if (subcategory) filter.subcategory = subcategory;
+
+  // An item with no meal-period restriction is served all day, so it matches every period.
+  if (query.period !== undefined && query.period !== "") {
+    const period = v.oneOf(String(query.period), MENU_PERIOD_KEYS, "period");
+    filter.$and = [
+      ...(filter.$and || []),
+      { $or: [{ menuPeriods: { $size: 0 } }, { menuPeriods: period }] },
+    ];
+  }
 
   if (query.dietary !== undefined && query.dietary !== "") {
     filter.dietary = v.oneOf(String(query.dietary), DIETARY, "dietary");

@@ -381,6 +381,56 @@ async function consumeOrder({ order, actor }) {
 }
 
 /**
+ * Return physical stock for an order that was cancelled or rejected after its
+ * units had been deducted. This only happens when INVENTORY_DEDUCT_AT=accepted
+ * and the order was cancelled straight from Accepted. Idempotent per line.
+ */
+async function restockOrder({ order, actor, reason }) {
+  const restocked = [];
+
+  for (const line of order.items || []) {
+    if (line.inventoryTracked !== true) continue;
+    if (line.stockConsumed !== true) continue; // nothing was deducted
+    if (line.stockRestocked === true) continue;
+
+    const qty = line.reservedQty ?? line.quantity;
+    const operationId = operationIdFor("restock", order._id, line.food);
+
+    const claimed = await claimOperation({
+      operationId,
+      foodId: line.food,
+      orderId: order._id,
+      type: "restock",
+      quantity: qty,
+      actor,
+      reason,
+      deltas: { stockDelta: qty, reservedDelta: 0 },
+    });
+    if (!claimed) continue; // already restocked
+
+    const updated = await Food.findOneAndUpdate(
+      { _id: line.food },
+      { $inc: { stock: qty }, $set: { updatedAt: new Date() } },
+      { new: true }
+    );
+
+    if (!updated) {
+      await abandonOperation(operationId);
+      continue;
+    }
+
+    await finalizeOperation(operationId, {
+      stockAfter: updated.stock,
+      reservedAfter: updated.reserved,
+    });
+
+    restocked.push({ food: line.food, quantity: qty });
+  }
+
+  return { restocked };
+}
+
+/**
  * Manual stock adjustment. Administrator only, reason mandatory.
  *
  * Either `delta` (signed change) or `setTo` (absolute target) is given.
@@ -547,6 +597,7 @@ module.exports = {
   reserveOne,
   releaseOrder,
   consumeOrder,
+  restockOrder,
   adjustStock,
   setTracking,
   lowStockItems,

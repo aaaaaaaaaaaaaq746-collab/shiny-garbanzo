@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { MENU_PERIOD_KEYS } = require("../utils/menuSchedule");
 
 const DIETARY = ["veg", "non-veg", "vegan", "jain", "egg"];
 
@@ -75,6 +76,33 @@ const foodSchema = new mongoose.Schema(
     // When an admin last acknowledged the low-stock condition for this item.
     // Drives "new alert" vs "already seen" without re-alerting every render.
     lowStockAcknowledgedAt: { type: Date, default: null },
+
+    // ---- Phase 2 menu management (additive, all defaulted). ----
+    // Finer grouping under `category` (e.g. Beverages > Hot, Cold).
+    subcategory: { type: String, trim: true, maxlength: 60, default: "" },
+    // Meal periods the item is served in. Empty means all day.
+    menuPeriods: { type: [{ type: String, enum: MENU_PERIOD_KEYS }], default: [] },
+    // Scheduled availability window. Null means no limit on that side.
+    servesFrom: { type: Date, default: null },
+    servesUntil: { type: Date, default: null },
+    // Temporary sold-out. The item comes back on its own after this time.
+    soldOutUntil: { type: Date, default: null },
+    // Discounted price, valid until saleEndsAt (null = until changed).
+    salePrice: { type: Number, min: 0, default: null },
+    saleEndsAt: { type: Date, default: null },
+    // Size or portion options, each with its own price (e.g. Half, Full).
+    variants: {
+      type: [
+        {
+          _id: false,
+          label: { type: String, required: true, trim: true, maxlength: 30 },
+          price: { type: Number, required: true, min: 0.01 },
+        },
+      ],
+      default: [],
+    },
+    // Free-text tags shown as badges (e.g. "spicy", "kids").
+    tags: { type: [{ type: String, trim: true, maxlength: 30 }], default: [] },
   },
   { timestamps: true }
 );

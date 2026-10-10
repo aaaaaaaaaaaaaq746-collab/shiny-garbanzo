@@ -30,7 +30,7 @@ const ROOM = {
   canteen: "canteen",
 };
 
-const isStaffRole = (role) => role === "admin" || role === "staff";
+const isStaffRole = (role) => role === "admin" || role === "staff" || role === "kitchen";
 
 /**
  * Attach real-time transport to an existing HTTP server.

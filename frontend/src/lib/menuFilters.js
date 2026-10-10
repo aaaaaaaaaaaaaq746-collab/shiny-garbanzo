@@ -14,6 +14,7 @@ export const DEFAULT_FILTERS = Object.freeze({
   available: false,
   featured: false,
   favoritesOnly: false,
+  period: "",
 });
 
 export const SORT_OPTIONS = Object.freeze([
@@ -37,6 +38,7 @@ export function foodQueryParams(f) {
   if (f.sort) params.sort = f.sort;
   if (f.available) params.available = "true";
   if (f.featured) params.featured = "true";
+  if (f.period) params.period = f.period;
   return params;
 }
 

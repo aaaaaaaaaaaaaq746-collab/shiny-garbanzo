@@ -524,3 +524,107 @@ Subscription endpoints are never returned by `GET /api/auth/me`.
 - Realtime `order:updated` can now arrive with the same status twice in a row,
   once for each new estimate. Clients must not treat that as a status change.
 
+
+## 10. Admin management (Phase 2 spec, sections 5–8)
+
+"Phase 2" here is the admin-management spec. It is separate from the order-lifecycle Phase 2 in sections 1–7.
+
+### 10.1 Kitchen role
+
+A `kitchen` account can sign in and is sent to the kitchen display only. It cannot see the admin dashboard.
+
+| Route | Kitchen | Staff | Admin |
+|---|---|---|---|
+| `GET /api/orders/kitchen` | yes | yes | yes |
+| `PUT /api/orders/:id/status` | to `Accepted`, `Preparing`, `Ready` only | yes | yes |
+| `PUT /api/orders/:id/status` to `Completed`, `Cancelled`, `Rejected` | 403 | yes | yes |
+| `PUT /api/orders/:id/priority` | yes | yes | yes |
+
+`GET /api/orders/kitchen` returns open orders in queue order: rush orders first, then the order due soonest (`pickupAt`, else `estimatedReadyAt`), then placement time, then id. The client applies the same order (`frontend/src/lib/kitchenSort.js`).
+
+**`PUT /api/orders/:id/priority`** with body `{ "priority": "normal" | "rush" }`.
+- 200: the order. Emits `order:updated`.
+- 404: unknown order.
+- 409: the order is not open. Open means Pending, Accepted, Preparing or Ready.
+- This is not a status change, so it writes no status-history entry.
+
+### 10.2 Sales analytics (`/api/analytics`, admin only)
+
+Query parameters for every route: `from` and `to` (`YYYY-MM-DD`, canteen-local days). The default is the last 30 canteen days ending today. The range is limited to 366 days, and `from` must not be after `to`. Otherwise 400.
+
+A **sale** is any order that is not `Cancelled` or `Rejected`. Revenue is the sum of `total` over sales. Average order value is revenue divided by sales. An order counts on the day it was placed.
+
+| Route | Extra parameters | Response |
+|---|---|---|
+| `GET /summary` | | `{ range, sales, revenue, averageOrderValue, completed, cancelled, rejected, todayKey, todaySales, todayRevenue, todayAverageOrderValue, refunds }` |
+| `GET /revenue` | `granularity` = `daily` (default), `weekly` (Monday start), `monthly` | `{ range, granularity, buckets: [{ period, revenue, orders, averageOrderValue }] }`. Days with no sales are included as zeros. |
+| `GET /items` | `limit` 1–50 (default 5) | `{ range, popular: [...], leastPopular: [...] }`. Each row: `{ foodId, name, category, quantity, revenue }`. |
+| `GET /peak-hours` | | `{ range, hours: [{ hour, sales }] }` for hours 0–23. |
+| `GET /refunds` | | `{ range, recorded, awaitingManualRefund, note }` |
+| `GET /export.csv` | `type` = `orders` (default) or `items` | CSV attachment, UTF-8 with BOM, CRLF lines. |
+
+**Refunds are reported from the stored payment status only.** This system has no payment gateway, so it never creates a refund.
+- `refunds.recorded`: orders whose `paymentStatus` is `refunded`, with count and amount.
+- `refunds.awaitingManualRefund`: orders that were `Cancelled` or `Rejected` while `paymentStatus` is `paid`. These need a manual refund. Count and amount.
+- `refunds.note`: a fixed sentence stating that no refund is created here.
+
+**CSV columns.**
+- `type=orders`: Order ID, Placed at (UTC), Status, Priority, Lines, Total, Payment status. No student name, email or id.
+- `type=items`: Item, Quantity sold, Revenue.
+
+Cells that begin with `=`, `+`, `-`, `@`, tab or CR are prefixed with an apostrophe, so spreadsheets do not run them as formulas.
+
+### 10.3 Staff and kitchen accounts (`/api/users`, admin only)
+
+Students are not listed or changed through this route.
+
+| Route | Body | Result |
+|---|---|---|
+| `GET /` | query `role` (`staff`, `kitchen`, `admin`), `q` (name or email search, up to 100 characters) | 200: array of `{ id, name, email, role, isActive, createdAt }`. Without `role`, all three staff roles. `role=student` is refused with 400. |
+| `POST /` | `{ name, email, password, role }`, role `staff`, `kitchen` or `admin` | 201: the account. 409 if the email exists. |
+| `PUT /:id/role` | `{ role }` (any role) | 200. 404 unknown account. 409 for removing your own admin role, demoting the last active admin, or a concurrent change (reload and retry). |
+| `PUT /:id/active` | `{ isActive }` | 200. 409 when deactivating your own account. A deactivated account is refused on its next request (401). |
+
+### 10.4 Inventory and stock (`/api/inventory`, admin only)
+
+- Stock is reserved when an order is placed, so a second order cannot take the same units.
+- `INVENTORY_DEDUCT_AT` (`preparing`, default, or `accepted`) sets when units are physically deducted.
+- Cancelling or rejecting an order that was only `Accepted`, with deduction at acceptance, writes a `restock` movement. Cancelling after cooking has started restores nothing automatically; an administrator makes a recorded adjustment.
+- Low-stock warnings: `GET /api/inventory/low-stock`, acknowledged with `POST /api/inventory/low-stock/ack`.
+- Ingredient-level inventory is deferred to a later extension.
+
+**Staff sold-out marking.** Staff and admins can set `available` and `soldOutUntil` through `PUT /api/food/:id`. Staff cannot change `stock` (403). Admins change stock through `POST /api/inventory/:foodId/adjust` on tracked items. The availability route `POST /api/inventory/:foodId/availability` is admin only.
+
+### 10.5 Menu management additions (`/api/food`)
+
+New item fields, all optional and all written through `POST /api/food` and `PUT /api/food/:id`:
+
+| Field | Meaning |
+|---|---|
+| `subcategory` | Text, up to 60 characters. Filter with `?subcategory=`. |
+| `tags` | Up to 10 tags, each up to 30 characters. |
+| `menuPeriods` | Any of `breakfast`, `lunch`, `snacks`, `dinner`. Empty means all day. Filter with `?period=`. |
+| `servesFrom`, `servesUntil` | ISO instants. Scheduled availability window. |
+| `soldOutUntil` | ISO instant. Temporary sold-out. `null` means not sold out. |
+| `salePrice`, `saleEndsAt` | Discounted price, valid until `saleEndsAt` (`null` means until changed). Must be below `price`. |
+| `variants` | Up to 6 items, each `{ label, price }`, for example Half and Full. The form accepts `Half:40; Full:60`. |
+| `prepTimeMinutes` | 0–240. |
+
+`GET /api/food` and `GET /api/food/:id` add `menuStatus`: `{ currentPrice, onSale, servable, reason }`. `currentPrice` is the price at the moment of the request (sale applied). `reason` is `null` when the item can be ordered now, otherwise one of `unavailable`, `sold-out-until`, `not-yet-served`, `no-longer-served`, `outside-menu-period`. The same rule blocks checkout with 409.
+
+**Meal-period windows** are set by `MENU_<PERIOD>_FROM` and `MENU_<PERIOD>_TO` (canteen-local `HH:MM`). Defaults are in `.env.example`.
+
+### 10.6 Menu image uploads (`POST /api/food/:id/image`, staff or admin)
+
+- Send the raw image bytes with `Content-Type` set to `image/jpeg`, `image/png` or `image/webp`.
+- The first bytes must match the declared type. SVG is refused.
+- The stored name is random, 32 hex characters plus the extension, under `/uploads/food/`. The previous uploaded image is removed after the new one is saved.
+- 201: the updated item. 400: contents do not match the type. 404: unknown item. 413: larger than `UPLOAD_MAX_BYTES` (default 2 MB; allowed 64 KB–5 MB). 415: empty body or unsupported type.
+- Files are served from `/uploads`, with `nosniff` and dotfiles denied. `backend/uploads/` is git-ignored.
+
+### 10.7 Compatibility
+
+- No existing route, field or status value was removed or renamed.
+- The stored status `Ready` is unchanged. Its label is "Ready for pickup" in the UI.
+- Coupon management (section 8.7) is unchanged.
+- Frontend: `VITE_API_URL` now defaults to empty, so requests are relative and the Vite proxy forwards `/api` and `/uploads`.

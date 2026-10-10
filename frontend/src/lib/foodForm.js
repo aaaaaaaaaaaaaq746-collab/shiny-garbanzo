@@ -15,10 +15,15 @@ export const DIETARY_CHOICES = Object.freeze([
   ["egg", "Egg"],
 ]);
 
+import { localInputToIso, isoToLocalInput } from "./mealPeriods.js";
+
 export const MAX_ADD_ONS = 10;
 export const MAX_LIST_ITEMS = 30;
+export const MAX_VARIANTS = 6;
+export const MAX_TAGS = 10;
 const MAX_PREP_MINUTES = 240;
 const MAX_ADD_ON_PRICE = 1000;
+const MAX_VARIANT_PRICE = 100000;
 
 /** Blank form for a new item. */
 export function emptyFoodForm() {
@@ -34,6 +39,15 @@ export function emptyFoodForm() {
     ingredients: "",
     allergens: "",
     addOns: "",
+    subcategory: "",
+    menuPeriods: [],
+    servesFrom: "",
+    servesUntil: "",
+    soldOutUntil: "",
+    salePrice: "",
+    saleEndsAt: "",
+    variants: "",
+    tags: "",
   };
 }
 
@@ -77,6 +91,40 @@ export function parseAddOns(text) {
   });
 }
 
+/**
+ * Parse "Half:40; Full:60" into sizes. Each size needs a name and a price.
+ * Throws an Error with a readable message.
+ */
+export function parseVariants(text) {
+  const entries = String(text || "")
+    .split(/[;\n]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  if (entries.length > MAX_VARIANTS) throw new Error(`At most ${MAX_VARIANTS} sizes`);
+
+  const seen = new Set();
+  return entries.map((entry) => {
+    const idx = entry.lastIndexOf(":");
+    if (idx === -1) throw new Error(`Size "${entry}" needs a price, for example Half:40`);
+    const label = entry.slice(0, idx).trim();
+    if (!label) throw new Error("Every size needs a name");
+    if (label.length > 30) throw new Error(`Size name "${label}" is too long`);
+    if (seen.has(label.toLowerCase())) throw new Error(`Duplicate size "${label}"`);
+    seen.add(label.toLowerCase());
+
+    const price = Number(entry.slice(idx + 1).trim());
+    if (!Number.isFinite(price) || price <= 0 || price > MAX_VARIANT_PRICE) {
+      throw new Error(`Size "${label}" price must be greater than zero`);
+    }
+    return { label, price: Math.round(price * 100) / 100 };
+  });
+}
+
+/** Inverse of parseVariants, for pre-filling the edit form. */
+export function formatVariants(variants) {
+  return (Array.isArray(variants) ? variants : []).map((v) => `${v.label}:${v.price}`).join("; ");
+}
+
 /** Inverse of parseAddOns, for pre-filling the edit form. */
 export function formatAddOns(addOns) {
   return (Array.isArray(addOns) ? addOns : [])
@@ -98,6 +146,15 @@ export function foodToForm(food) {
     ingredients: Array.isArray(food.ingredients) ? food.ingredients.join(", ") : "",
     allergens: Array.isArray(food.allergens) ? food.allergens.join(", ") : "",
     addOns: formatAddOns(food.addOns),
+    subcategory: food.subcategory || "",
+    menuPeriods: Array.isArray(food.menuPeriods) ? [...food.menuPeriods] : [],
+    servesFrom: isoToLocalInput(food.servesFrom),
+    servesUntil: isoToLocalInput(food.servesUntil),
+    soldOutUntil: isoToLocalInput(food.soldOutUntil),
+    salePrice: food.salePrice != null ? String(food.salePrice) : "",
+    saleEndsAt: isoToLocalInput(food.saleEndsAt),
+    variants: formatVariants(food.variants),
+    tags: Array.isArray(food.tags) ? food.tags.join(", ") : "",
   };
 }
 
@@ -145,4 +202,44 @@ export function formToPayload(form) {
   };
   if (prepTimeMinutes !== undefined) payload.prepTimeMinutes = prepTimeMinutes;
   return payload;
+}
+
+/**
+ * Menu-management fields (Phase 2): meal periods, serving window, sold-out time,
+ * sale, sizes and tags. The caller merges this into formToPayload's result, so
+ * an edit can also clear these fields. Throws Error on invalid input.
+ */
+export function formToMenuPayload(form) {
+  const price = Number(form.price);
+  // Sale rules, checked here so the form explains them before the server does.
+  const salePriceText = String(form.salePrice ?? "").trim();
+  let salePrice = null;
+  if (salePriceText !== "") {
+    salePrice = Number(salePriceText);
+    if (!Number.isFinite(salePrice) || salePrice <= 0) throw new Error("Sale price must be greater than zero");
+    if (salePrice >= price) throw new Error("Sale price must be lower than the price");
+  }
+  const saleEndsAt = localInputToIso(form.saleEndsAt);
+  if (saleEndsAt && salePrice === null) throw new Error("Set a sale price, or clear the sale end time");
+
+  const servesFrom = localInputToIso(form.servesFrom);
+  const servesUntil = localInputToIso(form.servesUntil);
+  if (servesFrom && servesUntil && new Date(servesFrom) >= new Date(servesUntil)) {
+    throw new Error("Serving start must be before serving end");
+  }
+
+  const tags = parseList(form.tags);
+  if (tags.length > MAX_TAGS) throw new Error(`At most ${MAX_TAGS} tags`);
+
+  return {
+    subcategory: String(form.subcategory || "").trim(),
+    menuPeriods: Array.isArray(form.menuPeriods) ? [...form.menuPeriods] : [],
+    servesFrom,
+    servesUntil,
+    soldOutUntil: localInputToIso(form.soldOutUntil),
+    salePrice,
+    saleEndsAt,
+    variants: parseVariants(form.variants),
+    tags,
+  };
 }

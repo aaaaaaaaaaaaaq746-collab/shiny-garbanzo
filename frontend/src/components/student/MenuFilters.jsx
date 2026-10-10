@@ -46,6 +46,22 @@ export default function MenuFilters({ filters, onChange, categories = [] }) {
         </select>
       </label>
       <label className="flex flex-col text-xs text-gray-600">
+        Meal
+        <select
+          data-testid="menu-period"
+          aria-label="Meal period"
+          value={filters.period || ""}
+          onChange={(e) => set({ period: e.target.value })}
+          className={field}
+        >
+          <option value="">Any time</option>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+          <option value="snacks">Snacks</option>
+          <option value="dinner">Dinner</option>
+        </select>
+      </label>
+      <label className="flex flex-col text-xs text-gray-600">
         Min ₹
         <input
           type="number"

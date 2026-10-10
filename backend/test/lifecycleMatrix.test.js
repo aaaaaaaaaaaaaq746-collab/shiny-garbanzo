@@ -46,6 +46,16 @@ const EXPECTED_SKIP_AHEAD = {
     Cancelled: [],
     Rejected: [], // staff may never reject
   },
+  // Kitchen accounts only move orders forward through the kitchen steps.
+  kitchen: {
+    Pending: ["Accepted", "Preparing", "Ready"],
+    Accepted: ["Preparing", "Ready"],
+    Preparing: ["Ready"],
+    Ready: [],
+    Completed: [],
+    Cancelled: [],
+    Rejected: [],
+  },
   student: {
     Pending: ["Cancelled"],
     Accepted: ["Cancelled"],
@@ -77,6 +87,15 @@ const EXPECTED_STRICT = {
     Cancelled: [],
     Rejected: [],
   },
+  kitchen: {
+    Pending: ["Accepted"],
+    Accepted: ["Preparing"],
+    Preparing: ["Ready"],
+    Ready: [],
+    Completed: [],
+    Cancelled: [],
+    Rejected: [],
+  },
   student: {
     Pending: ["Cancelled"],
     Accepted: ["Cancelled"],
@@ -88,7 +107,7 @@ const EXPECTED_STRICT = {
   },
 };
 
-const ROLES = ["admin", "staff", "student"];
+const ROLES = ["admin", "staff", "kitchen", "student"];
 
 function permittedSet(table, role, from) {
   return new Set(table[role][from]);

@@ -1,4 +1,7 @@
 const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const Food = require("../models/FoodItem");
 const {
   authMiddleware,
@@ -10,6 +13,13 @@ const inventory = require("../services/inventory");
 const { UNITS } = require("../models/FoodItem");
 const config = require("../config");
 const { parseFoodQuery, parseDietary, badgesFor, bestsellerIdSet } = require("../utils/discovery");
+const {
+  MENU_PERIOD_KEYS,
+  currentMenuPeriod,
+  effectiveBasePrice,
+  servingState,
+} = require("../utils/menuSchedule");
+const { sniffImageType, ALLOWED_IMAGE_TYPES, isLocalImagePath } = require("../utils/images");
 
 const router = express.Router();
 
@@ -65,6 +75,100 @@ function addOnList(value) {
   });
 }
 
+/** Optional date. Empty or null clears it; anything else must parse as a date. */
+function optionalDate(value, field) {
+  if (value === null || value === "") return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) throw ApiError.badRequest(`${field} must be a valid date`);
+  return d;
+}
+
+/** Meal periods, each named once. Empty means served all day. */
+function menuPeriodList(value) {
+  const list = v.array(value, { field: "menuPeriods", max: MENU_PERIOD_KEYS.length });
+  const out = [];
+  for (const raw of list) {
+    const key = v.oneOf(raw, MENU_PERIOD_KEYS, "menuPeriods");
+    if (!out.includes(key)) out.push(key);
+  }
+  return out;
+}
+
+/** Sizes such as Half and Full, each with its own price. At most 6, labels unique. */
+function variantList(value) {
+  const list = v.array(value, { field: "variants", max: 6 });
+  const seen = new Set();
+  return list.map((raw, index) => {
+    const x = v.object(raw, `variants[${index}]`);
+    const label = v.optionalString(x.label, { field: `variants[${index}].label`, max: 30 });
+    if (!label) throw ApiError.badRequest(`variants[${index}].label is required`);
+    if (seen.has(label.toLowerCase())) throw ApiError.badRequest(`Duplicate size "${label}"`);
+    seen.add(label.toLowerCase());
+    return { label, price: v.price(x.price, `variants[${index}].price`) };
+  });
+}
+
+/** Image field: a locally uploaded path, or an http(s) URL, or empty to clear. */
+function imageField(value) {
+  if (isLocalImagePath(value)) return value;
+  return v.optionalUrl(value) || null;
+}
+
+/**
+ * Menu-management fields shared by create and update (Phase 2 section 6).
+ *
+ * Returns only the keys the request sent. The cross-field rules are checked
+ * against the item's resulting values, so a sale or window that cannot hold
+ * is refused with 400 instead of being saved.
+ */
+function menuFieldsFrom(body, { price, current = {} }) {
+  const out = {};
+  if (body.subcategory !== undefined) {
+    out.subcategory = v.optionalString(body.subcategory, { field: "subcategory", max: 60 }) || "";
+  }
+  if (body.menuPeriods !== undefined) out.menuPeriods = menuPeriodList(body.menuPeriods);
+  if (body.servesFrom !== undefined) out.servesFrom = optionalDate(body.servesFrom, "servesFrom");
+  if (body.servesUntil !== undefined) out.servesUntil = optionalDate(body.servesUntil, "servesUntil");
+  if (body.soldOutUntil !== undefined) out.soldOutUntil = optionalDate(body.soldOutUntil, "soldOutUntil");
+  if (body.salePrice !== undefined) {
+    out.salePrice = body.salePrice === null || body.salePrice === "" ? null : v.price(body.salePrice, "salePrice");
+  }
+  if (body.saleEndsAt !== undefined) out.saleEndsAt = optionalDate(body.saleEndsAt, "saleEndsAt");
+  if (body.variants !== undefined) out.variants = variantList(body.variants);
+  if (body.tags !== undefined) out.tags = stringList(body.tags, { field: "tags", max: 10, itemMax: 30 });
+
+  const eff = (key) => (key in out ? out[key] : current[key]);
+  const salePrice = eff("salePrice");
+  if (salePrice !== null && salePrice !== undefined && salePrice >= price) {
+    throw ApiError.badRequest("salePrice must be lower than the price");
+  }
+  if ((salePrice === null || salePrice === undefined) && eff("saleEndsAt")) {
+    throw ApiError.badRequest("saleEndsAt needs a salePrice");
+  }
+  const from = eff("servesFrom");
+  const until = eff("servesUntil");
+  if (from && until && from.getTime() >= until.getTime()) {
+    throw ApiError.badRequest("servesFrom must be before servesUntil");
+  }
+  return out;
+}
+
+/**
+ * What a student sees right now: the price they pay, whether it is on sale,
+ * and whether the item can be ordered at this moment.
+ */
+function menuStatusFor(food, now, period) {
+  const price = Number(food.price);
+  const currentPrice = effectiveBasePrice(food, now);
+  const state = servingState(food, { nowMs: now, period });
+  return {
+    currentPrice,
+    onSale: currentPrice < price,
+    servable: state.servable,
+    reason: state.reason,
+  };
+}
+
 /**
  * List menu items.
  *
@@ -87,6 +191,7 @@ router.get("/", async (req, res) => {
   const bestsellerIds = bestsellerIdSet(topSellers, config.canteen.bestsellerCount);
 
   const now = Date.now();
+  const period = currentMenuPeriod(now, config.canteen.utcOffsetMinutes, config.canteen.menuPeriods);
   res.json(
     foods.map((food) => {
       const plain = food.toJSON();
@@ -95,6 +200,7 @@ router.get("/", async (req, res) => {
         now,
         newItemDays: config.canteen.newItemDays,
       });
+      plain.menuStatus = menuStatusFor(food, now, period);
       return plain;
     })
   );
@@ -119,6 +225,9 @@ router.get("/:id", async (req, res) => {
     bestsellerIds: bestsellerIdSet(top, config.canteen.bestsellerCount),
     newItemDays: config.canteen.newItemDays,
   });
+  const now = Date.now();
+  const period = currentMenuPeriod(now, config.canteen.utcOffsetMinutes, config.canteen.menuPeriods);
+  plain.menuStatus = menuStatusFor(food, now, period);
   res.json(plain);
 });
 
@@ -143,7 +252,7 @@ router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
       max: 600,
     }) || "";
   }
-  if (body.image !== undefined) payload.image = v.optionalUrl(body.image) || null;
+  if (body.image !== undefined) payload.image = imageField(body.image);
   if (body.category !== undefined) {
     payload.category = v.optionalString(body.category, { field: "category", max: 60 }) || "General";
   }
@@ -161,6 +270,7 @@ router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
   if (body.addOns !== undefined) payload.addOns = addOnList(body.addOns);
   if (body.ingredients !== undefined) payload.ingredients = stringList(body.ingredients, { field: "ingredients" });
   if (body.allergens !== undefined) payload.allergens = stringList(body.allergens, { field: "allergens" });
+  Object.assign(payload, menuFieldsFrom(body, { price: payload.price }));
 
   if (isAdmin && body.lowStockThreshold !== undefined) {
     payload.lowStockThreshold = v.quantity(body.lowStockThreshold, {
@@ -226,7 +336,7 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
     }) || "";
   }
   if (body.price !== undefined) food.price = v.price(body.price);
-  if (body.image !== undefined) food.image = v.optionalUrl(body.image) || null;
+  if (body.image !== undefined) food.image = imageField(body.image);
   if (body.category !== undefined) {
     food.category = v.optionalString(body.category, { field: "category", max: 60 }) || "General";
   }
@@ -244,6 +354,10 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
   if (body.addOns !== undefined) food.addOns = addOnList(body.addOns);
   if (body.ingredients !== undefined) food.ingredients = stringList(body.ingredients, { field: "ingredients" });
   if (body.allergens !== undefined) food.allergens = stringList(body.allergens, { field: "allergens" });
+  // Validated against the item's resulting price, then written field by field.
+  for (const [key, value] of Object.entries(menuFieldsFrom(body, { price: food.price, current: food }))) {
+    food[key] = value;
+  }
   if (body.stock !== undefined) {
     // Stock levels are administrator-only. Staff can still manage the menu.
     if (req.user.role !== "admin") {
@@ -262,6 +376,51 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
   await food.save();
   res.json(food);
 });
+
+/**
+ * Admin/staff: upload a menu image.
+ *
+ * The body is the raw image bytes. Content-Type must be image/jpeg, image/png
+ * or image/webp, and the first bytes must match that type. The file name is
+ * random, so the client's name never reaches the disk. The previous local
+ * image, if any, is removed after the new one is saved.
+ */
+router.post(
+  "/:id/image",
+  authMiddleware,
+  adminOrStaffMiddleware,
+  express.raw({ type: Object.keys(ALLOWED_IMAGE_TYPES), limit: config.uploads.maxBytes }),
+  async (req, res) => {
+    const id = v.objectId(req.params.id, "food id");
+    const food = await Food.findById(id);
+    if (!food) throw ApiError.notFound("Food item not found");
+
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw new ApiError(415, "Upload a JPEG, PNG or WebP image");
+    }
+    const declared = ALLOWED_IMAGE_TYPES[String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase()];
+    const actual = sniffImageType(req.body);
+    if (!actual || declared !== actual) {
+      throw ApiError.badRequest("The file must be a JPEG, PNG or WebP image whose contents match its type");
+    }
+
+    const name = `${crypto.randomBytes(16).toString("hex")}.${actual}`;
+    const dir = path.join(config.uploads.dir, "food");
+    await fs.promises.mkdir(dir, { recursive: true });
+    await fs.promises.writeFile(path.join(dir, name), req.body, { flag: "wx" });
+
+    const previous = food.image;
+    food.image = `/uploads/food/${name}`;
+    await food.save();
+
+    if (isLocalImagePath(previous)) {
+      // Safe: the stored path has already been matched against the strict pattern.
+      const old = path.join(config.uploads.dir, previous.replace(/^\/uploads\//, ""));
+      fs.promises.unlink(old).catch(() => {});
+    }
+    res.status(201).json(food);
+  }
+);
 
 // Admin/staff: delete food
 router.delete("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {

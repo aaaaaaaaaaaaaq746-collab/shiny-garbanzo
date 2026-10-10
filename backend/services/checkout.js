@@ -15,6 +15,7 @@ const ApiError = require("../utils/ApiError");
 const v = require("../utils/validators");
 const pricing = require("../utils/pricing");
 const slots = require("../utils/pickupSlots");
+const menuSchedule = require("../utils/menuSchedule");
 
 const { maxQuantityPerItem, maxItemsPerOrder } = config.order;
 const canteen = config.canteen;
@@ -63,10 +64,16 @@ async function resolveCart(body, { now = Date.now() } = {}) {
     if (!Array.isArray(addOnLabels)) {
       throw ApiError.badRequest(`items[${index}].addOns must be a list of add-on labels`);
     }
+    if (item.variant !== undefined && item.variant !== null && typeof item.variant !== "string") {
+      throw ApiError.badRequest(`items[${index}].variant must be text`);
+    }
+    const variantLabel =
+      typeof item.variant === "string" && item.variant.trim() ? item.variant.trim().slice(0, 30) : null;
     return {
       foodId,
       quantity,
       addOnLabels,
+      variantLabel,
       specialInstructions: item.specialInstructions ?? null,
     };
   });
@@ -74,7 +81,12 @@ async function resolveCart(body, { now = Date.now() } = {}) {
   // Quantities for an identical (item, add-ons, instructions) combination merge.
   const merged = new Map();
   for (const r of requests) {
-    const key = JSON.stringify([r.foodId, [...new Set(r.addOnLabels)].sort(), r.specialInstructions]);
+    const key = JSON.stringify([
+      r.foodId,
+      r.variantLabel,
+      [...new Set(r.addOnLabels)].sort(),
+      r.specialInstructions,
+    ]);
     const prev = merged.get(key);
     if (prev) {
       prev.quantity += r.quantity;
@@ -102,10 +114,17 @@ async function resolveCart(body, { now = Date.now() } = {}) {
 
   const lines = [];
   let maxPrep = 0;
+  const period = menuSchedule.currentMenuPeriod(now, canteen.utcOffsetMinutes, canteen.menuPeriods);
   for (const r of merged.values()) {
     const food = byId.get(r.foodId);
-    if (food.available === false) {
-      throw ApiError.conflict(`"${food.name}" is currently unavailable`);
+    // Unavailable, sold out for now, outside its scheduled window or meal period.
+    const state = menuSchedule.servingState(food, { nowMs: now, period });
+    if (!state.servable) {
+      throw ApiError.conflict(menuSchedule.reasonMessage(food.name, state.reason));
+    }
+    const hasSizes = Array.isArray(food.variants) && food.variants.length > 0;
+    if (hasSizes && !r.variantLabel) {
+      throw ApiError.badRequest(`Choose a size for "${food.name}"`);
     }
     const sellable = food.sellableQty();
     const needed = neededPerFood.get(r.foodId);
@@ -121,6 +140,8 @@ async function resolveCart(body, { now = Date.now() } = {}) {
         quantity: r.quantity,
         addOnLabels: r.addOnLabels,
         specialInstructions: r.specialInstructions,
+        variantLabel: r.variantLabel,
+        nowMs: now,
       })
     );
   }

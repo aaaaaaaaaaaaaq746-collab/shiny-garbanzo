@@ -13,6 +13,11 @@ export default defineConfig({
         target: process.env.VITE_API_URL || 'http://localhost:5000',
         changeOrigin: true,
       },
+      // Uploaded menu photos are served by the backend.
+      '/uploads': {
+        target: process.env.VITE_API_URL || 'http://localhost:5000',
+        changeOrigin: true,
+      },
     },
   },
 })

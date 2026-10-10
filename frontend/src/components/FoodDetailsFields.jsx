@@ -1,4 +1,5 @@
 import { DIETARY_CHOICES } from "../lib/foodForm";
+import { MEAL_PERIOD_CHOICES } from "../lib/mealPeriods";
 
 const field = "w-full p-2 border rounded";
 
@@ -106,6 +107,133 @@ export default function FoodDetailsFields({ value, onChange, disabled = false })
           value={value.addOns}
           onChange={(e) => set({ addOns: e.target.value })}
           placeholder="Extra cheese:20; Less spicy:0"
+          className={field}
+        />
+      </label>
+
+      <label className="text-sm text-gray-700">
+        Sub-category
+        <input
+          type="text"
+          aria-label="Subcategory"
+          maxLength={60}
+          disabled={disabled}
+          placeholder="e.g. Hot, Cold"
+          value={value.subcategory}
+          onChange={(e) => set({ subcategory: e.target.value })}
+          className={field}
+        />
+      </label>
+
+      <label className="text-sm text-gray-700">
+        Tags (comma separated)
+        <input
+          type="text"
+          aria-label="Tags"
+          disabled={disabled}
+          placeholder="spicy, kids, chef's pick"
+          value={value.tags}
+          onChange={(e) => set({ tags: e.target.value })}
+          className={field}
+        />
+      </label>
+
+      <fieldset className="text-sm text-gray-700 md:col-span-2" aria-label="Meal periods">
+        <legend className="mb-1">Served at (leave all unticked for all day)</legend>
+        <div className="flex flex-wrap gap-4">
+          {MEAL_PERIOD_CHOICES.map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                aria-label={`Serve at ${label}`}
+                disabled={disabled}
+                checked={value.menuPeriods.includes(key)}
+                onChange={(e) =>
+                  set({
+                    menuPeriods: e.target.checked
+                      ? [...value.menuPeriods, key]
+                      : value.menuPeriods.filter((p) => p !== key),
+                  })
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <label className="text-sm text-gray-700">
+        Available from (optional)
+        <input
+          type="datetime-local"
+          aria-label="Serves from"
+          disabled={disabled}
+          value={value.servesFrom}
+          onChange={(e) => set({ servesFrom: e.target.value })}
+          className={field}
+        />
+      </label>
+
+      <label className="text-sm text-gray-700">
+        Available until (optional)
+        <input
+          type="datetime-local"
+          aria-label="Serves until"
+          disabled={disabled}
+          value={value.servesUntil}
+          onChange={(e) => set({ servesUntil: e.target.value })}
+          className={field}
+        />
+      </label>
+
+      <label className="text-sm text-gray-700">
+        Sold out until (temporary; clears itself)
+        <input
+          type="datetime-local"
+          aria-label="Sold out until"
+          disabled={disabled}
+          value={value.soldOutUntil}
+          onChange={(e) => set({ soldOutUntil: e.target.value })}
+          className={field}
+        />
+      </label>
+
+      <div className="grid grid-cols-2 gap-3">
+        <label className="text-sm text-gray-700">
+          Sale price
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            aria-label="Sale price"
+            disabled={disabled}
+            value={value.salePrice}
+            onChange={(e) => set({ salePrice: e.target.value })}
+            className={field}
+          />
+        </label>
+        <label className="text-sm text-gray-700">
+          Sale ends
+          <input
+            type="datetime-local"
+            aria-label="Sale ends"
+            disabled={disabled}
+            value={value.saleEndsAt}
+            onChange={(e) => set({ saleEndsAt: e.target.value })}
+            className={field}
+          />
+        </label>
+      </div>
+
+      <label className="text-sm text-gray-700 md:col-span-2">
+        Sizes with prices (name:price, separated by semicolons; a sale applies to every size)
+        <input
+          type="text"
+          aria-label="Sizes"
+          disabled={disabled}
+          value={value.variants}
+          onChange={(e) => set({ variants: e.target.value })}
+          placeholder="Half:40; Full:60"
           className={field}
         />
       </label>

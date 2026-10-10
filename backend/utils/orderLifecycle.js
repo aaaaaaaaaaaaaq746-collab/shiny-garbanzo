@@ -1,5 +1,8 @@
 const ApiError = require("./ApiError");
 
+// Kitchen accounts may move an order through these statuses and no others.
+const KITCHEN_TARGETS = new Set(["Accepted", "Preparing", "Ready"]);
+
 /**
  * Centralized order lifecycle.
  *
@@ -80,6 +83,7 @@ const CANCELLABLE_BY = {
     STATUS.PREPARING,
     STATUS.READY,
   ]),
+  kitchen: new Set(),
 };
 
 /** Only an administrator may reject, and only before cooking starts. */
@@ -87,6 +91,7 @@ const REJECTABLE_BY = {
   student: new Set(),
   staff: new Set(),
   admin: new Set([STATUS.PENDING, STATUS.ACCEPTED]),
+  kitchen: new Set(),
 };
 
 /** Reasons are mandatory for these roles performing these outcomes. */
@@ -98,7 +103,7 @@ const REASON_REQUIRED = {
 const MAX_REASON_LENGTH = 300;
 
 function mayAdvance(role) {
-  return role === "admin" || role === "staff";
+  return role === "admin" || role === "staff" || role === "kitchen";
 }
 
 /**
@@ -134,6 +139,15 @@ function checkTransition({ from, to, role, strict = false }) {
       allowed: false,
       code: 409,
       message: `Order is already ${from} and can no longer change status`,
+    };
+  }
+
+  // Kitchen accounts run the queue. They never complete, cancel or reject.
+  if (role === "kitchen" && !KITCHEN_TARGETS.has(to)) {
+    return {
+      allowed: false,
+      code: 403,
+      message: "Kitchen staff can accept and advance orders, but cannot complete, cancel or reject them",
     };
   }
 

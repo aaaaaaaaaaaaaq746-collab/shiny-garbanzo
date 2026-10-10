@@ -78,6 +78,11 @@ export default function App() {
     );
   }
 
+  // Kitchen accounts get the kitchen display only. They cannot reach the admin board.
+  if (userRole === "kitchen") {
+    return <KitchenDisplay name={userName} role={userRole} onLogout={handleLogout} />;
+  }
+
   const isStaff = userRole === "admin" || userRole === "staff";
 
   if (isStaff) {

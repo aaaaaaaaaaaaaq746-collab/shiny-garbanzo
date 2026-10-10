@@ -2,7 +2,16 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { FaShoppingCart, FaHeart, FaStar } from "react-icons/fa";
 import { formatMoney } from "../../lib/cart";
-import api from "../../api";
+import api, { assetUrl } from "../../api";
+
+/** Student-facing reason an item cannot be ordered right now (server `menuStatus.reason`). */
+const UNAVAILABLE_TEXT = {
+  unavailable: "Unavailable",
+  "sold-out-until": "Sold out for now",
+  "not-yet-served": "Not on the menu yet",
+  "no-longer-served": "No longer on the menu",
+  "outside-menu-period": "Not served at this time of day",
+};
 
 /** Small coloured pill used for category, dietary and badge labels. */
 function Pill({ children, className }) {
@@ -73,8 +82,20 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
   const [customising, setCustomising] = useState(false);
   const [picked, setPicked] = useState([]);
   const [notes, setNotes] = useState("");
+  const sizes = Array.isArray(food.variants) ? food.variants : [];
+  const [size, setSize] = useState(sizes.length ? sizes[0].label : "");
 
-  const soldOut = food.available === false || (food.stock !== null && food.stock <= 0);
+  // Server-computed: the price payable now (sale applied) and whether it can be ordered now.
+  const menuStatus = food.menuStatus || { currentPrice: food.price, onSale: false, servable: true, reason: null };
+  const notServableNow = menuStatus.servable === false;
+  const chosen = sizes.find((s) => s.label === size) || null;
+  // A sale discounts a size by the same ratio as the base price (see menuSchedule.js).
+  const ratio = food.price ? menuStatus.currentPrice / food.price : 1;
+  const shownPrice = chosen
+    ? Math.round((menuStatus.onSale ? chosen.price * ratio : chosen.price) * 100) / 100
+    : menuStatus.currentPrice;
+
+  const soldOut = food.available === false || (food.stock !== null && food.stock <= 0) || notServableNow;
 
   // Stock-tracked items publish `availableQty` (physical stock minus what
   // is already reserved). It is advisory: the server revalidates on checkout.
@@ -93,6 +114,8 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
     onAdd(food, {
       addOns: addOns.filter((a) => picked.includes(a.label)),
       specialInstructions: notes,
+      variant: chosen ? chosen.label : null,
+      variantPrice: chosen ? shownPrice : null,
     });
 
   return (
@@ -104,7 +127,7 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
     >
       <div className="relative w-full">
         <img
-          src={food.image || "/placeholder-food.svg"}
+          src={assetUrl(food.image) || "/placeholder-food.svg"}
           alt={food.name}
           loading="lazy"
           className="rounded-xl w-full h-40 object-cover mb-3 shadow-inner"
@@ -139,6 +162,13 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
         {food.prepTimeMinutes != null && (
           <Pill className="bg-gray-100 text-gray-600">{food.prepTimeMinutes} min</Pill>
         )}
+        {Array.isArray(food.tags) &&
+          food.tags.map((t) => (
+            <Pill key={t} className="bg-indigo-100 text-indigo-700">
+              {t}
+            </Pill>
+          ))}
+        {menuStatus.onSale && <Pill className="bg-rose-100 text-rose-700 font-semibold">On sale</Pill>}
       </div>
 
       <p className="text-xs text-gray-600 mb-1 flex items-center gap-1" data-testid={`rating-${food._id}`}>
@@ -161,7 +191,41 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
         <p className="text-xs text-gray-500 text-center mb-1">Ingredients: {food.ingredients.join(", ")}</p>
       )}
 
-      <p className="text-xl font-bold mb-2 text-green-600">{formatMoney(food.price)}</p>
+      {menuStatus.onSale && !chosen ? (
+        <p className="text-xl font-bold mb-2 text-green-600" data-testid={`price-${food._id}`}>
+          <span className="line-through text-gray-400 text-base mr-2">{formatMoney(food.price)}</span>
+          {formatMoney(menuStatus.currentPrice)}
+        </p>
+      ) : (
+        <p className="text-xl font-bold mb-2 text-green-600" data-testid={`price-${food._id}`}>
+          {formatMoney(shownPrice)}
+        </p>
+      )}
+
+      {sizes.length > 0 && !soldOut && !exhausted && (
+        <div className="w-full mb-2" role="radiogroup" aria-label={`Size for ${food.name}`}>
+          <div className="flex flex-wrap justify-center gap-2 text-sm">
+            {sizes.map((s) => (
+              <label
+                key={s.label}
+                className={`px-3 py-1 rounded-full border cursor-pointer ${
+                  size === s.label ? "bg-purple-600 text-white border-purple-600" : "bg-white text-gray-700 border-gray-300"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name={`size-${food._id}`}
+                  value={s.label}
+                  checked={size === s.label}
+                  onChange={() => setSize(s.label)}
+                  className="sr-only"
+                />
+                {s.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {tracked && !soldOut && (
         <p
@@ -180,7 +244,11 @@ export default function FoodCard({ food, onAdd, isFavorite, onToggleFavorite, in
 
       {soldOut || exhausted ? (
         <p className="text-sm font-semibold text-red-500 mb-2" data-testid="sold-out">
-          {soldOut ? "Sold out" : "None left"}
+          {notServableNow
+            ? UNAVAILABLE_TEXT[menuStatus.reason] || "Not available right now"
+            : soldOut
+            ? "Sold out"
+            : "None left"}
         </p>
       ) : (
         <>

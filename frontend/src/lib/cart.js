@@ -11,9 +11,14 @@ export const CART_KEY = "canteen_cart";
 export const MAX_QTY_PER_LINE = 20;
 export const MAX_INSTRUCTIONS = 140;
 
-/** Stable identity for a cart line: same item + same options = same line. */
-export function lineKeyFor(foodId, addOnLabels = [], specialInstructions = "") {
+/**
+ * Stable identity for a cart line: same item, size, add-ons and instructions
+ * = same line. Lines without a size keep their earlier key, so carts saved by
+ * an older build still match.
+ */
+export function lineKeyFor(foodId, addOnLabels = [], specialInstructions = "", variant = "") {
   const labels = [...new Set(addOnLabels)].sort();
+  if (variant) return JSON.stringify([String(foodId), labels, specialInstructions || "", variant]);
   return JSON.stringify([String(foodId), labels, specialInstructions || ""]);
 }
 
@@ -32,12 +37,18 @@ function cleanInstructions(text) {
   return typeof text === "string" ? text.trim().slice(0, MAX_INSTRUCTIONS) : "";
 }
 
-function makeLine({ _id, name, price, quantity, addOns, specialInstructions, availableQty }) {
+function cleanVariant(value) {
+  return typeof value === "string" ? value.trim().slice(0, 30) : "";
+}
+
+function makeLine({ _id, name, price, quantity, addOns, specialInstructions, availableQty, variant }) {
   const options = cleanAddOns(addOns);
   const instructions = cleanInstructions(specialInstructions);
   const labels = options.map((a) => a.label);
+  const size = cleanVariant(variant);
   return {
-    lineKey: lineKeyFor(_id, labels, instructions),
+    lineKey: lineKeyFor(_id, labels, instructions, size),
+    variant: size || null,
     _id: String(_id),
     name: String(name ?? ""),
     price: Number(price) || 0,
@@ -98,11 +109,16 @@ export function quantityOfFood(cart, foodId) {
  * Returns { cart, error }. When the request would exceed the per-line maximum
  * or the advisory stock ceiling, the cart is returned unchanged with an error.
  */
-export function addToCart(cart, food, { addOns = [], specialInstructions = "", quantity = 1 } = {}) {
+export function addToCart(
+  cart,
+  food,
+  { addOns = [], specialInstructions = "", quantity = 1, variant = null, variantPrice = null } = {}
+) {
   const instructions = cleanInstructions(specialInstructions);
   const options = cleanAddOns(addOns);
   const labels = options.map((a) => a.label);
-  const key = lineKeyFor(food._id, labels, instructions);
+  const size = cleanVariant(variant);
+  const key = lineKeyFor(food._id, labels, instructions, size);
   const existing = cart.find((l) => l.lineKey === key);
   const current = existing ? existing.quantity : 0;
 
@@ -129,11 +145,12 @@ export function addToCart(cart, food, { addOns = [], specialInstructions = "", q
   const line = makeLine({
     _id: food._id,
     name: food.name,
-    price: food.price,
+    price: typeof variantPrice === "number" ? variantPrice : food.price,
     quantity,
     addOns: options,
     specialInstructions: instructions,
     availableQty: food.availableQty,
+    variant: size,
   });
   return { cart: [...cart, line], error: null };
 }
@@ -182,6 +199,7 @@ export function buildCheckoutPayload(cart, { pickupAt = null, couponCode = null 
   const payload = {
     items: cart.map((l) => {
       const line = { food: l._id, quantity: l.quantity };
+      if (l.variant) line.variant = l.variant;
       if (l.addOns.length) line.addOns = l.addOns.map((a) => a.label);
       if (l.specialInstructions) line.specialInstructions = l.specialInstructions;
       return line;
@@ -210,6 +228,7 @@ export function linesFromOrder(order) {
         addOns: item.addOns || [],
         specialInstructions: item.specialInstructions || "",
         availableQty: null,
+        variant: item.variant || "",
       });
     })
     .filter(Boolean);

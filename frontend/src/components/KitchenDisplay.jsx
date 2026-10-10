@@ -5,6 +5,7 @@ import api from "../api";
 import OrderTimeline from "./OrderTimeline";
 import { createRealtimeClient } from "../realtime";
 import { formatElapsed, waitTone, statusBadge, requiresReason, ACTION_STYLE } from "../orderStatus";
+import { sortKitchenQueue } from "../lib/kitchenSort";
 
 /**
  * Kitchen Display System.
@@ -132,6 +133,20 @@ export default function KitchenDisplay({ name, onLogout, onBack }) {
     }
   };
 
+  /**
+   * Mark an open order rush or normal. Not a status change. The server re-sorts
+   * the queue, so the board is re-read afterwards.
+   */
+  const setPriority = async (orderId, priority) => {
+    setError("");
+    try {
+      await api.put(`/orders/${orderId}/priority`, { priority });
+      await refreshAll();
+    } catch (err) {
+      setError(err.message || "Could not change priority");
+    }
+  };
+
   const counts = orders.reduce((acc, o) => {
     acc[o.status] = (acc[o.status] || 0) + 1;
     return acc;
@@ -219,7 +234,7 @@ export default function KitchenDisplay({ name, onLogout, onBack }) {
         </p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
-          {orders.map((order) => {
+          {sortKitchenQueue(orders).map((order) => {
             const elapsed = formatElapsed(order.date, now);
             const tone = waitTone(order.date, now);
             const isNew = highlighted.has(order._id);
@@ -238,6 +253,14 @@ export default function KitchenDisplay({ name, onLogout, onBack }) {
               >
                 <div className="flex justify-between items-start gap-2 mb-3">
                   <div>
+                    {order.priority === "rush" && (
+                      <span
+                        data-testid="kitchen-rush"
+                        className="inline-block mb-1 px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold tracking-wide"
+                      >
+                        RUSH
+                      </span>
+                    )}
                     <p className="font-bold text-purple-700 text-sm break-all">
                       {order._id}
                     </p>
@@ -309,6 +332,19 @@ export default function KitchenDisplay({ name, onLogout, onBack }) {
 
                 {/* Actions come straight from the server's lifecycle rules. */}
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="kitchen-priority"
+                    aria-pressed={order.priority === "rush"}
+                    onClick={() => setPriority(order._id, order.priority === "rush" ? "normal" : "rush")}
+                    className={`px-3 py-2 rounded-full text-sm font-semibold shadow ${
+                      order.priority === "rush"
+                        ? "bg-red-100 text-red-700 hover:bg-red-200"
+                        : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-300"
+                    }`}
+                  >
+                    {order.priority === "rush" ? "Clear rush" : "Mark rush"}
+                  </button>
                   {(order.allowedTransitions || []).map((next) => (
                     <button
                       key={next}

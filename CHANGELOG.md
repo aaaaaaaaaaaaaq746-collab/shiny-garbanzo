@@ -443,3 +443,47 @@ their slot counter is seeded from active orders the first time the slot is used.
 | Frontend lint | `npx eslint src public` | 0 errors. 3 warnings in `App.jsx` and `InventoryPanel.jsx`, which this change did not touch. |
 | Frontend build | `npm run build` | **Pass** |
 | Browser | — | **Not performed.** The push subscribe flow and the picker's disabled state have not been clicked in a browser. |
+
+## Admin management: Phase 2 spec, sections 5–8 (analytics, kitchen, inventory, menu)
+
+Scope is the admin-management spec. It is separate from the order-lifecycle Phase 2 above.
+
+### Features added
+- **Sales analytics** (admin): summary, revenue by day, week (Monday start) or month, top and least-popular items, peak hours, and refunds. Sales exclude Cancelled and Rejected. Days are canteen-local. Ranges are capped at 366 days. (`utils/analytics.js`, `routes/analytics.js`)
+- **CSV export** of orders (no student identity) or item totals, RFC 4180 with a BOM and a formula guard. (`utils/csv.js`, `GET /api/analytics/export.csv`)
+- **Refund summary from recorded status only.** `refunded` orders are counted. Cancelled or rejected orders with `paid` status are flagged for manual refund. No refund is created.
+- **Kitchen role** (`kitchen`) with its own screen. Kitchen accounts can move orders only to Accepted, Preparing, or Ready. They cannot complete, cancel, or reject. Admin dashboard unchanged for admins and staff. (`kitchenAccessMiddleware`, `App.jsx`)
+- **Kitchen queue order and rush priority.** Rush first, then due time, then placement time. `PUT /api/orders/:id/priority`. (`utils/kitchenPriority.js`, `lib/kitchenSort.js`)
+- **Configurable deduction point**, `INVENTORY_DEDUCT_AT=preparing|accepted`. Cancel from Accepted restocks only when deducted at acceptance. (`utils/inventoryPlan.js`)
+- **Low-stock warnings and acknowledgement** in the inventory panel. (`GET /api/inventory/low-stock`, `POST /api/inventory/low-stock/ack`)
+- **Staff sold-out marking** through `PUT /api/food/:id` (`available`, `soldOutUntil`). Staff still cannot change stock.
+- **Menu management**: subcategory, tags (up to 10), meal periods with configurable windows, scheduled availability (`servesFrom`, `servesUntil`), temporary sold-out, sale price with end date, variants such as Half and Full (up to 6), prep time (0–240 minutes). Filters `?subcategory=` and `?period=`. `GET /api/food` adds `menuStatus`. (`utils/menuSchedule.js`, `routes/food.js`, `utils/discovery.js`)
+- **Menu image uploads**, `POST /api/food/:id/image`. JPEG, PNG and WebP only, checked by magic bytes. SVG refused. Random file names. Served from `/uploads`. (`utils/images.js`)
+- **Staff and kitchen account management** (admin only), `routes/users.js`. Students are not listed. Cannot remove your own admin role or deactivate yourself. The last active admin cannot be demoted.
+- **Admin dashboard tabs**: Overview, Orders, Menu, Inventory, Analytics, Coupons, Staff, Announcements. Admin-only tabs are hidden from staff.
+- **Frontend API base** defaults to a relative base. The Vite proxy forwards `/api` and `/uploads`. `VITE_API_URL` may be empty.
+
+### Bugs fixed
+- None in this pass. New validation: a sale price must be below the regular price, and a sale end date needs a sale price (both 400).
+
+### Migrations introduced
+- Additive only. New optional fields on `FoodItem` (`subcategory`, `menuPeriods`, `servesFrom`, `servesUntil`, `soldOutUntil`, `salePrice`, `saleEndsAt`, `variants`, `tags`), on `Order` (`priority`, default `normal`), and on `User` (`kitchen` role). `InventoryMovement` gains type `restock`. Existing documents read as before.
+- No data is rewritten.
+
+### Tests and checks performed
+
+| Check | Command | Result |
+|---|---|---|
+| Backend pure suites | `node --test` on analytics, csv, images, inventoryPlan, kitchenPriority, menuSchedule, kitchenRole, lifecycleMatrix, studentPricing, studentPure, notificationPlan, kitchenQueue, sessionRules | **Pass.** 13, 6, 8, 8, 7, 15, 6, 406, 17, 13, 16, 12, 14 respectively. |
+| App loads | `require('./app')()` | Pass. `routes/users.js` and `routes/analytics.js` load. |
+| Backend full suite | `npm test` | **820 tests: 568 pass, 252 fail.** All failures are DB-backed suites. `MongoMemoryServer` cannot download a MongoDB binary because `fastdl.mongodb.org` is not reachable from the sandbox. They are not code results, and the DB-backed suites for this work were **not executed**. |
+| Frontend unit tests | `npm run test:unit` | **71 / 71 pass.** Includes `analytics.test.js` and the new `kitchenAndMeals.test.js` (run in UTC, Asia/Calcutta and America/New_York). |
+| Frontend lint | `npx eslint src` | **0 errors, 3 warnings.** All three are in `App.jsx` and `InventoryPanel.jsx` and predate this change. |
+| Frontend build | `npx vite build` | **Pass.** |
+| Browser | — | **Not performed.** The admin tabs, kitchen screen, photo upload and CSV download have not been clicked in a browser. |
+
+### Known limitations
+- Analytics are computed on request, with no pre-aggregation.
+- Ingredient-level inventory is deferred.
+- Kitchen priority is not a lifecycle transition and writes no status-history entry.
+- Staff sold-out marking is allowed. This is the current behaviour and is listed as an owner decision in PLAN.md.

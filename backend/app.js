@@ -11,6 +11,8 @@ const inventoryRoutes = require("./routes/inventory");
 const reviewRoutes = require("./routes/reviews");
 const couponRoutes = require("./routes/coupons");
 const notificationRoutes = require("./routes/notifications");
+const userRoutes = require("./routes/users");
+const analyticsRoutes = require("./routes/analytics");
 
 /**
  * Build the Express application.
@@ -55,6 +57,20 @@ function createApp() {
     res.json({ status: "ok", uptime: process.uptime() });
   });
 
+  // Uploaded menu images. Public like the menu itself; nosniff stops a file
+  // from being read as anything other than an image.
+  app.use(
+    "/uploads",
+    express.static(config.uploads.dir, {
+      dotfiles: "deny",
+      index: false,
+      setHeaders(res) {
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      },
+    })
+  );
+
   app.use("/api", apiLimiter);
   app.use("/api/auth", authRoutes);
   app.use("/api/food", foodRoutes);
@@ -63,6 +79,8 @@ function createApp() {
   app.use("/api/reviews", reviewRoutes);
   app.use("/api/coupons", couponRoutes);
   app.use("/api/notifications", notificationRoutes);
+  app.use("/api/users", userRoutes);
+  app.use("/api/analytics", analyticsRoutes);
 
   // --- Centralized fallbacks (must be registered last) ---
   app.use(notFoundHandler);

@@ -17,7 +17,8 @@ Status key: **Done** (in the repo and verified as stated), **Done, unverified**
 | 2 | Order lifecycle state machine and student cancellation | **Done, unverified (DB)** | See the Phase 2 table. Pure tests pass; DB tests are written but not executed here. |
 | 2.5 | Fix-all pass before Phase 3 (P2-R1, P2-R2, P1-N1/N2/N7/N13, P0-N9 to N12, N3 to N6) | **Done, unverified (DB)** | See the Fix-all table. |
 | 1-SX | Student experience (feature spec Phase 1): discovery, cart and checkout, tracking, account, live wait, pickup capacity, email and push | **Feature scope complete; verification pending** | Scope is built (see the Student-experience table and the CHANGELOG entry "Phase 1 remaining gaps"). Excluding testing, Phase 1 is complete. Not yet verified: DB-backed tests (no MongoDB binary here), browser checks, and real email and push delivery (needs SMTP and VAPID configuration). |
-| 3+ | Analytics and exports, payments, QR, PWA, recommendations | **Open** | Milestones M2–M8 in `docs/AUDIT.md` §7. Payments, QR and PWA scope need decisions (§8). Menu/cart UX, receipts, coupons and reviews were delivered under 1-SX. |
+| Admin | Admin management, spec sections 5–8: sales analytics and CSV export, kitchen display role, inventory and stock, advanced menu management and image uploads | **Done, unverified (DB); browser not checked** | See the Admin management table below. This is the admin-management spec, separate from the order-lifecycle Phase 2 above. |
+| 3+ | Payments, QR, PWA, recommendations, ingredient-level inventory | **Open** | Milestones M2–M8 in `docs/AUDIT.md` §7. Payments, QR and PWA scope need decisions (§8). Ingredient-level inventory is deferred as a later extension (admin spec §8). Menu/cart UX, receipts, coupons, reviews, analytics and CSV export are delivered. |
 
 ### Phase 1 — status detail
 
@@ -109,6 +110,18 @@ npm ci
 MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 ```
 
+### Verification (this environment, admin management pass)
+
+| Check | Result |
+|---|---|
+| Backend pure suites (13 files) | Pass, 0 failures. |
+| `require('./app')()` | Pass. |
+| `npm test` (backend, full) | 820 tests: 568 pass, 252 fail. All 252 failures are DB-backed suites that cannot start MongoDB here (`fastdl.mongodb.org` blocked). |
+| `npm run test:unit` (frontend) | 71 / 71 pass. |
+| `npx eslint src` (frontend) | 0 errors, 3 warnings (pre-existing, in `App.jsx` and `InventoryPanel.jsx`). |
+| `npx vite build` (frontend) | Pass. |
+| Browser | Not performed. |
+
 ## Student experience (1-SX) status detail
 
 | Requirement | Status | Evidence |
@@ -126,7 +139,7 @@ MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 | Profile, password, favourites, reorder | Done | `PUT /api/auth/me` (phone); `POST /api/auth/me/password` (revokes other sessions); reorder merges lines. |
 | Reviews after completion | Done | `routes/reviews.js` (one per item per order, unique index, atomic average). Students can read written reviews from the food card (`ReviewsToggle` in `student/FoodCard.jsx`). |
 | History filters, receipts, notification preferences | Done; email and push **built, unverified against real services** | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`. `orderUpdates` gates the pickup alert and `sound` plays a chime (`lib/notify.js`). Email and browser push are built as an outbox with per-channel state, retries and a dispatch timer (`services/notifications.js`, `utils/notificationPlan.js`, `routes/notifications.js`). Both are opt-in per student and need server configuration. `promotions` now drives admin announcements (`POST /api/notifications/announcements`). Delivery was tested with fake transports only. No real SMTP server or push service was contacted. |
-| Payments and refunds | **Not in scope** | The app records `paymentStatus` only. No money moves. See the open decisions. |
+| Payments and refunds | **Not in scope** | The app records `paymentStatus` only. No money moves and no refund is created. Refunds are reported from the recorded status only, in the analytics summary (`refunds.recorded`, `refunds.awaitingManualRefund`). See the open decisions. |
 
 The DB-backed tests for these routes are in `backend/test/studentFeatures.test.js`.
 They have not been run.
@@ -138,6 +151,32 @@ new database-backed tests were not run in this sandbox (no MongoDB binary); the
 editor and reviews toggle were checked by server-side render only, not clicked in
 a browser.
 
+## Admin management (admin spec sections 5–8) status detail
+
+Turn 10 work. Not verified in a browser. Database-backed tests were not run (see Verification).
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Analytics: revenue (daily, weekly, monthly), items, peak hours, refunds from recorded status | **Done, unverified (DB)** | `utils/analytics.js` (pure, tested in `test/analytics.test.js`); `routes/analytics.js`. Sale = not Cancelled or Rejected. Canteen-local days. |
+| CSV export (orders or items), no student identity | **Done, unverified (DB)** | `utils/csv.js` (RFC 4180, BOM, formula guard; `test/csv.test.js`); `GET /api/analytics/export.csv`. |
+| Kitchen display as its own role and screen; admin dashboard kept | **Done** | `kitchen` role in `models/User.js`; `kitchenAccessMiddleware`; kitchen moves limited to Accepted, Preparing, Ready (`test/kitchenRole.test.js`, `lifecycleMatrix.test.js`). `App.jsx` routes kitchen accounts to `KitchenDisplay` only. Queue order in `utils/kitchenPriority.js` and `lib/kitchenSort.js` (`test/kitchenPriority.test.js`, `tests/unit/kitchenAndMeals.test.js`). Rush toggle via `PUT /api/orders/:id/priority`. |
+| Inventory: atomic stock, configurable deduction point | **Done, unverified (DB)** | `INVENTORY_DEDUCT_AT` (`utils/inventoryPlan.js`, `test/inventoryPlan.test.js`). Restock on cancel from Accepted only when deducted at acceptance. Cancel after cooking restores nothing automatically. |
+| Low-stock warnings | **Done, unverified (DB)** | `GET /api/inventory/low-stock`, acknowledge with `POST /api/inventory/low-stock/ack`; `InventoryPanel.jsx`. |
+| Staff sold-out marking | **Done** | Staff set `available` and `soldOutUntil` through `PUT /api/food/:id`. Staff cannot change stock (403). The availability route is admin only. |
+| Ingredient-level inventory | **Deferred** | Later extension, per the spec. |
+| Categories and subcategories | **Done** | `subcategory` on `FoodItem`; `?subcategory=` filter; `AdminDashboard.jsx`, `FoodDetailsFields.jsx`. |
+| Meal periods | **Done** | `menuPeriods`, `MENU_<PERIOD>_FROM/TO` windows (`utils/menuSchedule.js`, `test/menuSchedule.test.js`). `?period=` filter. |
+| Scheduled availability and temporary sold-out | **Done** | `servesFrom`, `servesUntil`, `soldOutUntil`. Blocked at checkout with 409 and a stated reason. |
+| Discounted prices | **Done** | `salePrice`, `saleEndsAt`; must be below price. Applied in `utils/pricing.js`. |
+| Coupons | **Done** | Pre-existing admin routes (`routes/coupons.js`); coupon admin panel `CouponPanel.jsx`. |
+| Variants (for example Half and Full) | **Done** | `variants` (up to 6), priced per size, sale applied as a ratio to variant prices. Cart keys include the variant. |
+| Prep time, tags | **Done** | `prepTimeMinutes` (0–240); `tags` (up to 10, 30 characters each). |
+| Image uploads | **Done, unverified (DB)** | `POST /api/food/:id/image`. Magic-byte check; SVG refused; random names; `/uploads` served with `nosniff`. Git-ignored `backend/uploads/`. `utils/images.js` tested (`test/images.test.js`). |
+| Staff and kitchen accounts | **Done, unverified (DB)** | `routes/users.js` (admin only); students are not listed. `StaffPanel.jsx`. |
+| Overview tab | **Done** | `OverviewPanel.jsx`; today's figures from `GET /api/analytics/summary`. |
+
+Frontend API base: `src/api.js` now defaults to a relative base, and the Vite proxy forwards `/api` and `/uploads`. Set `VITE_API_URL` only for a separate API host.
+
 ## Known limitations (documented, not fixed)
 
 - **Crash window on standalone MongoDB.** Without transactions, a claim is written before its counter change. A process crash between those two steps leaves a claim with no counter change, so that movement is never applied. This under-applies and never double-applies. Replica sets have no such window, because the claim and the counter change are one transaction. Recovery tooling is not built.
@@ -145,13 +184,19 @@ a browser.
 - **Inventory retry is lazy.** A pending inventory step is completed by the next status-changing request for that order (or the next cancel). It is not retried in the background, and a `GET` does not complete it.
 - **Live update after a failed inventory step.** The status is committed, but the realtime event is only emitted after the inventory step succeeds, so a student's open page may show the old status until a refresh.
 - **Cancel from Preparing/Ready does not restore stock.** This is unchanged. Recovery needs an explicit admin adjustment.
+- **Kitchen priority is not a status change.** Rush or normal is set with `PUT /api/orders/:id/priority` and writes no status-history entry.
+- **Ingredient-level inventory is not built.** Stock is per menu item.
+- **Staff can mark items sold out.** This is intentional under the admin spec. Staff cannot change stock levels.
+- **Analytics are computed on request.** Each request reads the orders in its range. There is no pre-aggregation, so very large ranges may be slow.
 
 ## Open owner decisions
 
 1. Confirm that logout revoking every device is acceptable (`docs/API.md`).
 2. Payments, QR and PWA scope (`docs/AUDIT.md` §8).
 3. Whether to build background recovery for the standalone crash window.
+4. Staff sold-out marking is allowed through `PUT /api/food/:id` (current behaviour). Confirm, or restrict it to admins.
+5. Whether kitchen accounts should see the full order list or only the kitchen queue (current: the kitchen queue only, through `GET /api/orders/kitchen`).
 
 ## Next step
 
-Run `npm test` in `backend/` on a machine that can run MongoDB. That is the only check that exercises P2-R1, P2-R2, N2 to N5, the DB-backed session tests, and `test/studentFeatures.test.js`. Then run the Playwright suite (`npm run test:e2e`) in a browser, and do a manual pass over the student screens. Report any failures before Phase 3.
+On a machine that can download MongoDB (`mongodb-memory-server` fetches a binary from fastdl.mongodb.org, which this sandbox cannot reach), run `npm test` in `backend/`. That is the only check that exercises the DB-backed suites, including the admin routes (analytics, users, food images, coupons, inventory). Then run `npm run test:unit` and `npm run build` in `frontend/`, and the Playwright suite (`npm run test:e2e`). Do a manual browser pass over the admin dashboard, kitchen display and student screens, and report any failures before Phase 3.

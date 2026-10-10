@@ -136,7 +136,17 @@ const adminOrStaffMiddleware = (req, res, next) => {
   return next();
 };
 
+/** Kitchen display access: kitchen accounts, staff and admins. */
+const kitchenAccessMiddleware = (req, res, next) => {
+  if (!req.user) return next(ApiError.unauthorized());
+  if (!["admin", "staff", "kitchen"].includes(req.user.role)) {
+    return next(ApiError.forbidden("Kitchen or staff access only"));
+  }
+  return next();
+};
+
 module.exports = {
+  kitchenAccessMiddleware,
   authMiddleware,
   optionalAuthMiddleware,
   adminMiddleware,

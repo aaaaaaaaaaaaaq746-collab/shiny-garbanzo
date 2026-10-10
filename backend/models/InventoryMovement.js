@@ -15,6 +15,7 @@ const MOVEMENT_TYPES = [
   "reserve", // order placed: quantity committed
   "release", // order cancelled/rejected before prep: commitment returned
   "consume", // preparation started: physical stock decremented
+  "restock", // cancelled after stock was deducted: physical stock returned
   "adjustment", // manual admin correction
 ];
 
@@ -22,6 +23,7 @@ const REASONS = {
   reserve: "Order placed",
   release: "Order cancelled or rejected",
   consume: "Preparation started",
+  restock: "Order cancelled after stock was deducted",
 };
 
 const movementSchema = new mongoose.Schema(

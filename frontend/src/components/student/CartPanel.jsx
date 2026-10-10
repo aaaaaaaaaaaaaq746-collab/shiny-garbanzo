@@ -88,7 +88,10 @@ export default function CartPanel({
                 className="flex justify-between items-center mb-3 border-b border-gray-200 pb-2 gap-3"
               >
                 <div>
-                  <h3 className="font-bold text-purple-700">{item.name}</h3>
+                  <h3 className="font-bold text-purple-700">
+                    {item.name}
+                    {item.variant ? <span className="text-sm font-normal text-gray-600"> ({item.variant})</span> : null}
+                  </h3>
                   {item.addOns.map((a) => (
                     <p key={a.label} className="text-xs text-gray-600">
                       + {a.label} ({formatMoney(a.price)})

@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
-const ROLES = ["student", "staff", "admin"];
+// "kitchen" is a kitchen-display account: it can accept and advance orders,
+// nothing else. See utils/orderLifecycle.js.
+const ROLES = ["student", "staff", "kitchen", "admin"];
 
 const UserSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 80 },

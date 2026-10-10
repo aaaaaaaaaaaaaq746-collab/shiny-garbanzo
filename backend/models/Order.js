@@ -35,6 +35,7 @@ const orderItemSchema = new mongoose.Schema(
     stockReserved: { type: Boolean, default: false },
     stockConsumed: { type: Boolean, default: false },
     stockReleased: { type: Boolean, default: false },
+    stockRestocked: { type: Boolean, default: false },
 
     // ---- Phase 1 student-experience fields (additive). ----
     // Snapshot of the chosen add-ons and their prices at purchase time.
@@ -45,6 +46,8 @@ const orderItemSchema = new mongoose.Schema(
     // Unit price of the base item, before add-ons.
     basePrice: { type: Number, min: 0, default: null },
     specialInstructions: { type: String, trim: true, maxlength: 140, default: null },
+    // Chosen size or portion (e.g. "Half"). Null for items without sizes.
+    variant: { type: String, trim: true, maxlength: 30, default: null },
   },
   { _id: false }
 );
@@ -102,8 +105,10 @@ const OrderSchema = new mongoose.Schema({
   // same atomic update as the status change that needs it, and cleared once
   // the work succeeds. A request that finds a marker completes the work first,
   // so a failed inventory step is retried instead of silently lost.
-  inventoryPendingKind: { type: String, enum: ["consume", "release", null], default: null },
+  inventoryPendingKind: { type: String, enum: ["consume", "release", "restock", null], default: null },
   inventoryPendingReason: { type: String, default: null, maxlength: 300 },
+  // Kitchen priority. Rush orders are shown first on the kitchen display.
+  priority: { type: String, enum: ["normal", "rush"], default: "normal" },
   paymentStatus: {
     type: String,
     enum: ["unpaid", "paid", "refunded"],
