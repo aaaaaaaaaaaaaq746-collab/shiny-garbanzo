@@ -88,6 +88,8 @@ const OrderSchema = new mongoose.Schema({
   pickupSlot: { type: String, default: null, trim: true },
   // Chosen pickup time (an exact grid slot). Null means "as soon as ready".
   pickupAt: { type: Date, default: null },
+  // Whether this order holds a seat in its pickup slot. See services/pickupCapacity.js.
+  pickupSeatHeld: { type: Boolean, default: false },
   // Itemized charges after the discount, e.g. packaging and tax.
   charges: {
     type: [{ _id: false, label: { type: String, maxlength: 60 }, amount: { type: Number, min: 0 } }],
@@ -109,7 +111,14 @@ const OrderSchema = new mongoose.Schema({
   },
   notes: { type: String, default: null, trim: true, maxlength: 300 },
   cancelledAt: { type: Date, default: null },
+  // Estimated ready time. Recalculated from the kitchen queue whenever the
+  // queue changes and on a timer (services/kitchenEta.js), not fixed at order time.
   estimatedReadyAt: { type: Date, default: null },
+  estimateUpdatedAt: { type: Date, default: null },
+  // Preparation time of the longest item, used by the queue model.
+  prepMinutes: { type: Number, default: 15, min: 0, max: 240 },
+  // When the kitchen started preparing this order. Set on entering Preparing.
+  preparingAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },
 });
 

@@ -15,6 +15,10 @@ const Coupon = require("../models/Coupon");
 const { renderReceipt } = require("../utils/receipt");
 const { parseOrderHistoryQuery, buildHistoryFilter } = require("../utils/orderHistory");
 const slots = require("../utils/pickupSlots");
+const { slotKey } = require("../utils/pickupCapacity");
+const pickupCapacity = require("../services/pickupCapacity");
+const { refreshEstimates } = require("../services/kitchenEta");
+const { enqueueOrderNotification } = require("../services/notifications");
 const {
   STATUS,
   ORDER_STATUSES,
@@ -32,6 +36,14 @@ const canteen = config.canteen;
 
 // Statuses shown on the kitchen display: everything still in progress.
 const KITCHEN_STATUSES = ["Pending", "Accepted", "Preparing", "Ready"];
+
+/**
+ * Recalculate estimated ready times after the queue changed. Failure is logged,
+ * not thrown: the change that caused it has already been saved.
+ */
+function afterQueueChange() {
+  return refreshEstimates().catch((err) => console.error("Estimate refresh failed:", err.message));
+}
 
 /** Validate the optional reason and enforce it where policy demands one. */
 function parseReason(body, { required, what }) {
@@ -176,6 +188,7 @@ async function applyTransition({ orderId, expectedFrom, to, actor, reason }) {
 
   const set = { status: to };
   if (to === STATUS.CANCELLED) set.cancelledAt = new Date();
+  if (to === STATUS.PREPARING) set.preparingAt = new Date();
   if (to === STATUS.COMPLETED) set.completedAt = new Date();
   set.inventoryPendingKind = pendingKind;
   set.inventoryPendingReason = pendingKind ? reason || null : null;
@@ -204,6 +217,19 @@ async function applyTransition({ orderId, expectedFrom, to, actor, reason }) {
       `Order changed to ${current.status} before this update could be applied`
     );
   }
+
+  // A cancelled or rejected order gives its pickup seat back. The seat is
+  // released once, however many times the cancellation is retried.
+  if ([STATUS.CANCELLED, STATUS.REJECTED].includes(to)) {
+    await pickupCapacity.releaseOrderSeat(updated).catch((err) =>
+      console.error("Pickup seat release failed:", err.message)
+    );
+  }
+
+  // Tell the student. Recorded in the outbox; delivery happens on the timer.
+  await enqueueOrderNotification({ order: updated, status: to, reason }).catch((err) =>
+    console.error("Notification enqueue failed:", err.message)
+  );
 
   return updated;
 }
@@ -258,6 +284,10 @@ function publicLine(line) {
 router.post("/quote", authMiddleware, async (req, res) => {
   const body = v.object(req.body);
   const { lines, bill, pickupAt, maxPrep } = await resolveCart(body);
+  if (pickupAt) {
+    const left = (await pickupCapacity.seatsRemainingFor([pickupAt])).get(slotKey(pickupAt));
+    if (left === 0) throw ApiError.conflict("That pickup slot is full. Choose another time.");
+  }
   res.json({
     lines: lines.map(publicLine),
     bill,
@@ -278,6 +308,20 @@ router.post("/", authMiddleware, async (req, res) => {
   const body = v.object(req.body);
   const { lines, bill, coupon, pickupAt, maxPrep } = await resolveCart(body);
 
+  // Take a seat in the chosen pickup slot before anything is written. Released
+  // again if any later step fails.
+  let seatTaken = false;
+  if (pickupAt) {
+    if (!(await pickupCapacity.reserveSeat(pickupAt))) {
+      throw ApiError.conflict("That pickup slot is full. Choose another time.");
+    }
+    seatTaken = true;
+  }
+  const releaseSeat = () => {
+    if (seatTaken) pickupCapacity.releaseUnsavedSeat(pickupAt).catch(() => {});
+    seatTaken = false;
+  };
+
   // Claim one use of a limited coupon atomically before writing the order.
   // The conditional update means two checkouts cannot both take the last use.
   let couponClaimed = false;
@@ -296,6 +340,7 @@ router.post("/", authMiddleware, async (req, res) => {
       { $inc: { usedCount: 1 } }
     );
     if (claim.modifiedCount !== 1) {
+      releaseSeat();
       throw ApiError.conflict("This coupon has been fully used");
     }
     couponClaimed = true;
@@ -344,12 +389,15 @@ router.post("/", authMiddleware, async (req, res) => {
       ],
       statusHistoryTotal: 1,
       estimatedReadyAt: maxPrep ? new Date(Date.now() + maxPrep * 60 * 1000) : null,
+      prepMinutes: maxPrep,
       pickupAt,
+      pickupSeatHeld: seatTaken,
       pickupSlot: v.optionalString(body.pickupSlot, { field: "pickupSlot", max: 60 }) || null,
       notes: v.optionalString(body.notes, { field: "notes", max: 300 }) || null,
     });
   } catch (err) {
     releaseCoupon();
+    releaseSeat();
     throw err;
   }
 
@@ -366,6 +414,7 @@ router.post("/", authMiddleware, async (req, res) => {
     // Compensating delete: the order was never acknowledged to the client.
     await Order.deleteOne({ _id: order._id }).catch(() => {});
     releaseCoupon();
+    releaseSeat();
     if (err instanceof inventory.InventoryError) {
       throw ApiError.conflict(err.message);
     }
@@ -388,6 +437,10 @@ router.post("/", authMiddleware, async (req, res) => {
     })),
     { ordered: false }
   ).catch(() => {});
+
+  // The new order changes the queue for everyone behind it, and gets its own
+  // first estimate here.
+  await afterQueueChange();
 
   const fresh = await Order.findById(order._id);
   const response = decorate(fresh || order, req.user);
@@ -446,6 +499,7 @@ router.get("/slots", authMiddleware, async (req, res) => {
   }
   const now = Date.now();
   const open = openSlotsFor(now, maxPrep);
+  const seats = await pickupCapacity.seatsRemainingFor(open.map((ms) => new Date(ms)));
   res.json({
     name: canteen.name,
     utcOffsetMinutes: canteen.utcOffsetMinutes,
@@ -454,7 +508,12 @@ router.get("/slots", authMiddleware, async (req, res) => {
     earliestReadyAt: new Date(
       slots.earliestReadyAt(now, maxPrep, canteen.prepBufferMinutes)
     ).toISOString(),
-    slots: slots.describeSlots(open, canteen.utcOffsetMinutes),
+    // 0 means unlimited. Each slot says how many seats remain (null when unlimited).
+    capacity: pickupCapacity.capacity(),
+    slots: slots.describeSlots(open, canteen.utcOffsetMinutes).map((s) => {
+      const seatsLeft = seats.get(slotKey(s.at)) ?? null;
+      return { ...s, seatsLeft, available: seatsLeft === null || seatsLeft > 0 };
+    }),
   });
 });
 
@@ -583,7 +642,9 @@ router.put("/:id/status", authMiddleware, adminOrStaffMiddleware, async (req, re
     at: updated.statusHistory[updated.statusHistory.length - 1]?.at,
   });
 
-  res.json(decorate(updated, req.user));
+  await afterQueueChange();
+  const latest = (await Order.findById(updated._id)) || updated;
+  res.json(decorate(latest, req.user));
 });
 
 /**
@@ -657,7 +718,9 @@ router.post("/:id/cancel", authMiddleware, async (req, res) => {
     at: updated.statusHistory[updated.statusHistory.length - 1]?.at,
   });
 
-  res.json(decorate(updated, req.user));
+  await afterQueueChange();
+  const latest = (await Order.findById(updated._id)) || updated;
+  res.json(decorate(latest, req.user));
 });
 
 module.exports = router;

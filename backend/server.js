@@ -6,6 +6,7 @@ const config = require("./config");
 
 const app = createApp();
 const { attachRealtime } = require("./realtime");
+const { startBackgroundJobs } = require("./services/scheduler");
 
 async function start() {
   try {
@@ -29,6 +30,10 @@ async function start() {
 
   // Optional notification transport. REST is unaffected if this is disabled.
   attachRealtime(server);
+
+  // Queue estimates and notification delivery run on timers. Not started by
+  // app.js, so tests that import the app get no background work.
+  startBackgroundJobs();
 
   const shutdown = (signal) => {
     console.log(`\n${signal} received, shutting down gracefully...`);

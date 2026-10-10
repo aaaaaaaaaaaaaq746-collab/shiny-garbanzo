@@ -2,14 +2,16 @@
  * Notification preferences, as the student dashboard applies them.
  *
  * The server stores `notificationPrefs` on the user. These helpers decide what
- * the in-app pickup alert does with them. Email and push delivery are not built,
- * so `promotions` has no effect yet: no promotional messages are sent.
+ * the in-app pickup alert does with them. `email` and `push` control off-site
+ * delivery; the server sends those only when it is configured for them.
  */
 
 export const DEFAULT_NOTIFICATION_PREFS = Object.freeze({
   orderUpdates: true,
   promotions: false,
   sound: true,
+  email: false,
+  push: false,
 });
 
 /** Keep only known keys with boolean values; anything else falls back to the default. */

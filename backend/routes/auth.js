@@ -98,7 +98,7 @@ router.put("/me", authMiddleware, async (req, res) => {
   if (body.phone !== undefined) user.phone = parsePhone(body.phone);
   if (body.notificationPrefs !== undefined) {
     const prefs = v.object(body.notificationPrefs, "notificationPrefs");
-    for (const key of ["orderUpdates", "promotions", "sound"]) {
+    for (const key of ["orderUpdates", "promotions", "sound", "email", "push"]) {
       if (prefs[key] !== undefined) {
         user.notificationPrefs[key] = v.boolean(prefs[key], key);
       }

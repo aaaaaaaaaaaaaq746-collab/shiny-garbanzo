@@ -373,3 +373,73 @@ write. Existing menu items get `ratingAverage: 0` and `orderCount: 0` by default
 | Server render of the student screens | `esbuild` bundle plus `react-dom/server` | Renders `StudentDashboard`, `FoodCard` (available, sold-out, exhausted), `CartPanel` (with and without a cart), `OrderCard` (Pending, Completed, Rejected), history and menu filters, and `AccountPanel`. Test IDs present, and Cancel and Rate buttons appear only when eligible. Render-only, not a browser test. |
 | Playwright end-to-end | `npm run test:e2e` | **Not run** (needs MongoDB and a browser) |
 | Browser | — | **Not performed** |
+
+## Phase 1 remaining gaps: live wait, pickup capacity, email and push notifications
+
+Closes the three Phase 1 gaps that were still open: the estimated wait was set
+once at placement, pickup slots had no capacity, and email and push were not
+built. Additive changes only. No existing route, field or status changed meaning.
+
+### Features added
+
+- **Live estimated wait.** The estimate is recalculated on placement, status change,
+  cancellation, and every `KITCHEN_ETA_REFRESH_SECONDS` (default 60). A FIFO queue
+  model with `KITCHEN_PARALLEL_ORDERS` (default 3) working at once. Only changes
+  over 60 seconds are written and emitted, as `order:updated` with the unchanged status.
+- **Pickup slot capacity.** `PICKUP_SLOT_CAPACITY` (default 20, 0 = unlimited).
+  Seats are counted with conditional updates, so the last seat cannot be sold twice.
+  `GET /api/orders/slots` returns `capacity` and each slot's `seatsLeft` and
+  `available`. Quote and placement return 409 for a full slot. A cancel or
+  rejection releases the seat once.
+- **Email and browser push notifications.** An outbox (`Notification`) records each
+  order status change and each admin announcement. A timer (`NOTIFY_DISPATCH_SECONDS`,
+  default 30) sends them. Each channel has its own state and retry limit
+  (`NOTIFY_MAX_ATTEMPTS`, default 3). Both channels are opt-in per student and need
+  server configuration. Nothing is sent otherwise.
+- **Routes.** `GET /api/notifications/push-key`,
+  `POST` and `DELETE /api/notifications/push-subscriptions`,
+  `POST /api/notifications/announcements` (admin only).
+- **Account.** `notificationPrefs.email` and `notificationPrefs.push` in the account
+  panel. Browser push subscribes through `public/sw.js` and `lib/push.js`.
+- **Admin.** Announcement form (`AnnouncementPanel.jsx`) to students who opted into
+  promotions. `promotions` now has an effect.
+- **Picker.** Full pickup slots are shown as "(full)" and cannot be chosen.
+
+### Schema changes (additive)
+
+- `Order`: `prepMinutes`, `preparingAt`, `estimateUpdatedAt`, `pickupSeatHeld`.
+  Defaults are set, so older documents load unchanged.
+- `User`: `notificationPrefs.email`, `notificationPrefs.push` (default `false`), and
+  `pushSubscriptions` (`select: false`, never returned by `/me`).
+- New collections: `notifications`, `pickupslotcounts`. Created on first write.
+
+### Migrations introduced
+
+None required. Existing orders without `pickupSeatHeld` count as holding a seat, and
+their slot counter is seeded from active orders the first time the slot is used.
+
+### Dependencies added
+
+- `backend`: `nodemailer@^7.0.13`, `web-push@^3.6.7`.
+
+### Known limitations (not built or not verified)
+
+- **Email and push were not tested against real services.** The tests use fake
+  transports. No SMTP server or push service was contacted from this environment.
+- **Single process only.** The dispatcher's guard is in memory. Several server
+  processes would send duplicates until a claim step is added.
+- **Seat release can leak on a rare failure.** If the release fails after the order is
+  saved, the error is logged and the seat stays held. Nothing re-counts it automatically.
+- **The wait is a model, not a measurement.** A stopped kitchen or a slow dish is not seen.
+- **Coupon limits remain global**, and **no payments or refunds** (unchanged).
+
+### Tests and checks performed (this environment)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend pure suites (8 files) | `node --test` on `lifecycleMatrix`, `sessionRules`, `studentCheckout`, `studentPricing`, `studentDiscovery`, `studentPure`, `kitchenQueue`, `notificationPlan` | **403 / 403 pass** (includes 28 new: queue ordering and cancel recalculation, channel rules, retry limit, seat math) |
+| Backend full suite | `npm test` | **659 tests: 407 pass, 252 fail.** All 252 failures come from MongoMemoryServer being unable to download a MongoDB binary (`fastdl.mongodb.org` is blocked here). They are not code results. The DB-backed tests for this change (14 new in `studentFeatures.test.js`: capacity, cancel release, estimate recalculation, outbox and dispatch, retry, push subscriptions, announcements, dietary validation) were **written and syntax-checked, NOT executed**. |
+| Frontend unit tests | `npm run test:unit` | **38 / 38 pass** |
+| Frontend lint | `npx eslint src public` | 0 errors. 3 warnings in `App.jsx` and `InventoryPanel.jsx`, which this change did not touch. |
+| Frontend build | `npm run build` | **Pass** |
+| Browser | — | **Not performed.** The push subscribe flow and the picker's disabled state have not been clicked in a browser. |

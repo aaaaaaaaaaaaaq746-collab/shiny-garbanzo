@@ -16,6 +16,7 @@ import { emptyFoodForm, foodToForm, formToPayload } from "../lib/foodForm";
 import { statusTone, requiresReason, ACTION_STYLE } from "../orderStatus";
 import { createRealtimeClient } from "../realtime";
 import InventoryPanel from "./InventoryPanel";
+import AnnouncementPanel from "./AnnouncementPanel";
 
 /** Filter chips shown above the order board. */
 const FILTERS = [
@@ -301,6 +302,9 @@ const refreshOrder = useCallback(async (orderId) => {
 
       {/* ===== Inventory (administrators only) ===== */}
       {role === "admin" && <InventoryPanel />}
+
+      {/* ===== Announcements (administrators only) ===== */}
+      {role === "admin" && <AnnouncementPanel />}
 
       {/* ===== Menu Management ===== */}
       <h2 className="text-2xl font-bold mb-4 text-gray-800">Menu Management</h2>

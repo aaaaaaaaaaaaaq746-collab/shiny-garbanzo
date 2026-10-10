@@ -350,3 +350,336 @@ test("menu: /categories still resolves (not captured by /:id)", async () => {
   assert.equal(res.status, 200);
   assert.ok(res.body.includes("Drinks"));
 });
+
+
+/** Walk an order through the real kitchen steps so every transition is legal. */
+async function driveTo(orderId, admin, statuses) {
+  for (const status of statuses) {
+    const res = await api().put(`/api/orders/${orderId}/status`).set(auth(admin)).send({ status });
+    assert.equal(res.status, 200, `moving to ${status}`);
+  }
+}
+
+// ------------------------------------------------- pickup seat capacity
+// Config is changed per test and restored in `finally`. Services read the
+// config at call time, so the change takes effect without a restart.
+
+const configModule = require("../config");
+
+async function openSlotAt(token, index = 0) {
+  const res = await api().get("/api/orders/slots").set(auth(token));
+  assert.equal(res.status, 200);
+  return res.body.slots[index].at;
+}
+
+test("capacity: a full slot refuses the next booking with 409, and the slot list says so", async () => {
+  const original = configModule.canteen.slotCapacity;
+  configModule.canteen.slotCapacity = 1;
+  try {
+    const first = await studentSession();
+    const second = await studentSession();
+    const food = await makeFood({ name: "Samosa", price: 15 });
+    const slot = await openSlotAt(first.token);
+    const body = { items: [{ food: food._id.toString(), quantity: 1 }], pickupAt: slot };
+
+    assert.equal((await api().post("/api/orders").set(auth(first.token)).send(body)).status, 201);
+
+    const refused = await api().post("/api/orders").set(auth(second.token)).send(body);
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.message, /full/);
+
+    const quote = await api().post("/api/orders/quote").set(auth(second.token)).send(body);
+    assert.equal(quote.status, 409, "the quote reports the full slot before checkout");
+
+    const listed = await api().get("/api/orders/slots").set(auth(second.token));
+    const entry = listed.body.slots.find((s) => s.at === slot);
+    assert.equal(entry.seatsLeft, 0);
+    assert.equal(entry.available, false);
+  } finally {
+    configModule.canteen.slotCapacity = original;
+  }
+});
+
+test("capacity: cancelling frees the seat once; repeating the cancel does not free a second one", async () => {
+  const original = configModule.canteen.slotCapacity;
+  configModule.canteen.slotCapacity = 1;
+  try {
+    const a = await studentSession();
+    const b = await studentSession();
+    const c = await studentSession();
+    const food = await makeFood({ name: "Idli", price: 20 });
+    const slot = await openSlotAt(a.token);
+    const body = { items: [{ food: food._id.toString(), quantity: 1 }], pickupAt: slot };
+
+    const placed = await api().post("/api/orders").set(auth(a.token)).send(body);
+    assert.equal(placed.status, 201);
+    const orderId = placed.body._id;
+
+    assert.equal((await api().post(`/api/orders/${orderId}/cancel`).set(auth(a.token)).send({})).status, 200);
+    assert.equal((await api().post(`/api/orders/${orderId}/cancel`).set(auth(a.token)).send({})).status, 200);
+
+    assert.equal((await api().post("/api/orders").set(auth(b.token)).send(body)).status, 201, "freed seat is bookable");
+    assert.equal(
+      (await api().post("/api/orders").set(auth(c.token)).send(body)).status,
+      409,
+      "the repeated cancel must not have released a second seat"
+    );
+  } finally {
+    configModule.canteen.slotCapacity = original;
+  }
+});
+
+test("capacity: zero means unlimited, so several bookings share a slot", async () => {
+  const original = configModule.canteen.slotCapacity;
+  configModule.canteen.slotCapacity = 0;
+  try {
+    const a = await studentSession();
+    const b = await studentSession();
+    const food = await makeFood({ name: "Chai", price: 10 });
+    const slot = await openSlotAt(a.token);
+    const body = { items: [{ food: food._id.toString(), quantity: 1 }], pickupAt: slot };
+    assert.equal((await api().post("/api/orders").set(auth(a.token)).send(body)).status, 201);
+    assert.equal((await api().post("/api/orders").set(auth(b.token)).send(body)).status, 201);
+  } finally {
+    configModule.canteen.slotCapacity = original;
+  }
+});
+
+// ------------------------------------------------- live wait estimate
+
+test("estimate: an order behind another moves earlier when the one ahead is cancelled", async () => {
+  const originalParallel = configModule.kitchen.parallel;
+  configModule.kitchen.parallel = 1;
+  try {
+    const ahead = await studentSession();
+    const behind = await studentSession();
+    const longDish = await makeFood({ name: "Biryani", price: 150, prepTimeMinutes: 15 });
+    const quickDish = await makeFood({ name: "Lassi", price: 30, prepTimeMinutes: 10 });
+
+    const first = await api()
+      .post("/api/orders")
+      .set(auth(ahead.token))
+      .send({ items: [{ food: longDish._id.toString(), quantity: 1 }] });
+    const second = await api()
+      .post("/api/orders")
+      .set(auth(behind.token))
+      .send({ items: [{ food: quickDish._id.toString(), quantity: 1 }] });
+    assert.equal(first.status, 201);
+    assert.equal(second.status, 201);
+
+    const queued = await api().get(`/api/orders/${second.body._id}`).set(auth(behind.token));
+    const queuedAt = new Date(queued.body.estimatedReadyAt).getTime();
+
+    assert.equal(
+      (await api().post(`/api/orders/${first.body._id}/cancel`).set(auth(ahead.token)).send({})).status,
+      200
+    );
+
+    const after = await api().get(`/api/orders/${second.body._id}`).set(auth(behind.token));
+    const afterAt = new Date(after.body.estimatedReadyAt).getTime();
+    const movedBy = queuedAt - afterAt;
+    assert.ok(movedBy > 13 * 60 * 1000 && movedBy < 17 * 60 * 1000, `expected about 15 minutes earlier, got ${movedBy / 60000}`);
+  } finally {
+    configModule.kitchen.parallel = originalParallel;
+  }
+});
+
+test("estimate: moving an order to Preparing records when cooking began", async () => {
+  const s = await studentSession();
+  const admin = await adminToken();
+  const food = await makeFood({ name: "Upma", price: 25, prepTimeMinutes: 8 });
+  const placed = await api()
+    .post("/api/orders")
+    .set(auth(s.token))
+    .send({ items: [{ food: food._id.toString(), quantity: 1 }] });
+  assert.equal(placed.status, 201);
+
+  await driveTo(placed.body._id, admin, ["Accepted"]);
+  const moved = await api()
+    .put(`/api/orders/${placed.body._id}/status`)
+    .set(auth(admin))
+    .send({ status: "Preparing" });
+  assert.equal(moved.status, 200);
+  assert.ok(moved.body.preparingAt, "preparingAt is set on entering Preparing");
+  const ready = new Date(moved.body.estimatedReadyAt).getTime();
+  const started = new Date(moved.body.preparingAt).getTime();
+  assert.ok(Math.abs(ready - (started + 8 * 60 * 1000)) < 1000, "ready = started + prep time");
+});
+
+// ------------------------------------------------- notifications
+
+test("notifications: a status change is recorded once per transition for the student", async () => {
+  const Notification = require("../models/Notification");
+  const s = await studentSession();
+  const admin = await adminToken();
+  const food = await makeFood({ name: "Poha", price: 20 });
+  const placed = await api()
+    .post("/api/orders")
+    .set(auth(s.token))
+    .send({ items: [{ food: food._id.toString(), quantity: 1 }] });
+  const id = placed.body._id;
+
+  assert.equal((await api().put(`/api/orders/${id}/status`).set(auth(admin)).send({ status: "Accepted" })).status, 200);
+  assert.equal((await api().put(`/api/orders/${id}/status`).set(auth(admin)).send({ status: "Preparing" })).status, 200);
+
+  const rows = await Notification.find({ order: id, kind: "order_status" }).lean();
+  assert.equal(rows.length, 2, "one entry per transition, none for placement");
+  assert.deepEqual(rows.map((r) => r.body).sort(), [
+    "Your order has been accepted and will be prepared shortly.",
+    "Your order is being prepared.",
+  ]);
+});
+
+test("notifications: dispatch emails only students who opted in, and skips the rest", async () => {
+  const Notification = require("../models/Notification");
+  const User = require("../models/User");
+  const { dispatchDue } = require("../services/notifications");
+
+  const optedIn = await studentSession();
+  const notIn = await studentSession();
+  await User.updateOne({ _id: optedIn.id }, { $set: { "notificationPrefs.email": true } });
+
+  const admin = await adminToken();
+  const food = await makeFood({ name: "Vada", price: 12 });
+  for (const s of [optedIn, notIn]) {
+    const placed = await api()
+      .post("/api/orders")
+      .set(auth(s.token))
+      .send({ items: [{ food: food._id.toString(), quantity: 1 }] });
+    await driveTo(placed.body._id, admin, ["Accepted", "Preparing", "Ready"]);
+  }
+
+  const sent = [];
+  const transports = {
+    emailConfigured: true,
+    pushConfigured: true,
+    sendEmail: async (msg) => {
+      sent.push(msg.to);
+    },
+    sendPushOne: async () => {},
+  };
+  const result = await dispatchDue({ transports, limit: 50 });
+  assert.ok(result.processed >= 2);
+  assert.deepEqual(sent, [optedIn.email], "only the opted-in student receives email");
+
+  const rows = await Notification.find({ user: { $in: [optedIn.id, notIn.id] } }).lean();
+  const skippedForNotIn = rows.filter((r) => String(r.user) === notIn.id);
+  assert.ok(skippedForNotIn.every((r) => r.channels.email.state === "skipped"));
+  assert.ok(rows.filter((r) => String(r.user) === optedIn.id).every((r) => r.channels.email.state === "sent"));
+
+  const again = await dispatchDue({ transports, limit: 50 });
+  assert.equal(again.processed, 0, "nothing is pending a second time");
+  assert.deepEqual(sent, [optedIn.email], "no duplicate email");
+});
+
+test("notifications: a failing transport is retried, then marked failed at the limit", async () => {
+  const Notification = require("../models/Notification");
+  const User = require("../models/User");
+  const { dispatchDue } = require("../services/notifications");
+
+  const s = await studentSession();
+  await User.updateOne({ _id: s.id }, { $set: { "notificationPrefs.email": true } });
+  const admin = await adminToken();
+  const food = await makeFood({ name: "Dal", price: 40 });
+  const placed = await api()
+    .post("/api/orders")
+    .set(auth(s.token))
+    .send({ items: [{ food: food._id.toString(), quantity: 1 }] });
+  await driveTo(placed.body._id, admin, ["Accepted", "Preparing", "Ready"]);
+
+  const transports = {
+    emailConfigured: true,
+    pushConfigured: false,
+    sendEmail: async () => {
+      throw new Error("SMTP unavailable");
+    },
+  };
+  const max = configModule.notify.maxAttempts;
+  for (let i = 0; i < max; i += 1) await dispatchDue({ transports, limit: 50 });
+
+  const row = await Notification.findOne({ order: placed.body._id, kind: "order_status" }).lean();
+  assert.equal(row.channels.email.state, "failed");
+  assert.equal(row.channels.email.attempts, max);
+  assert.equal(row.channels.email.lastError, "SMTP unavailable");
+});
+
+test("push: the key is null until configured; subscriptions are https-only, replaced by endpoint, and never shown on /me", async () => {
+  const s = await studentSession();
+
+  const key = await api().get("/api/notifications/push-key").set(auth(s.token));
+  assert.equal(key.status, 200);
+  assert.equal(key.body.publicKey, null, "no VAPID keys in this environment");
+
+  const bad = await api()
+    .post("/api/notifications/push-subscriptions")
+    .set(auth(s.token))
+    .send({ endpoint: "http://push.example.com/abc", keys: { p256dh: "k", auth: "a" } });
+  assert.equal(bad.status, 400);
+
+  const endpoint = "https://push.example.com/sub/1";
+  const body = { endpoint, keys: { p256dh: "p256dh-key", auth: "auth-key" } };
+  assert.equal((await api().post("/api/notifications/push-subscriptions").set(auth(s.token)).send(body)).status, 201);
+  assert.equal((await api().post("/api/notifications/push-subscriptions").set(auth(s.token)).send(body)).status, 201);
+
+  const User = require("../models/User");
+  const stored = await User.findById(s.id).select("+pushSubscriptions").lean();
+  assert.equal(stored.pushSubscriptions.length, 1, "the same endpoint is stored once");
+
+  const me = await api().get("/api/auth/me").set(auth(s.token));
+  assert.equal(me.body.pushSubscriptions, undefined, "subscription endpoints are not returned to the client");
+
+  const removed = await api()
+    .delete("/api/notifications/push-subscriptions")
+    .query({ endpoint })
+    .set(auth(s.token));
+  assert.equal(removed.status, 200);
+  const after = await User.findById(s.id).select("+pushSubscriptions").lean();
+  assert.equal(after.pushSubscriptions.length, 0);
+});
+
+test("announcements: admin only; reach students who opted into promotions", async () => {
+  const User = require("../models/User");
+  const s = await studentSession();
+  const other = await studentSession();
+  await User.updateOne({ _id: s.id }, { $set: { "notificationPrefs.promotions": true } });
+
+  const denied = await api()
+    .post("/api/notifications/announcements")
+    .set(auth(s.token))
+    .send({ title: "Lunch offer", body: "Thali is 20% off today." });
+  assert.equal(denied.status, 403);
+
+  const admin = await adminToken();
+  const sent = await api()
+    .post("/api/notifications/announcements")
+    .set(auth(admin))
+    .send({ title: "Lunch offer", body: "Thali is 20% off today." });
+  assert.equal(sent.status, 201);
+  assert.equal(sent.body.recipients, 1, "only the student who opted in");
+  assert.notEqual(other.id, s.id);
+});
+
+test("menu: dietary is validated on create and update; a known value is stored", async () => {
+  const admin = await adminToken();
+  const created = await api()
+    .post("/api/food")
+    .set(auth(admin))
+    .send({ name: "Lassi", price: 30, dietary: "keto" });
+  assert.equal(created.status, 400, "an unknown dietary value is refused");
+  assert.match(created.body.message, /dietary/i);
+
+  const food = await makeFood({ name: "Dosa", price: 60 });
+  const updated = await api()
+    .put(`/api/food/${food._id}`)
+    .set(auth(admin))
+    .send({ dietary: "jain" });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.dietary, "jain");
+
+  const badUpdate = await api()
+    .put(`/api/food/${food._id}`)
+    .set(auth(admin))
+    .send({ dietary: "keto" });
+  assert.equal(badUpdate.status, 400);
+  assert.match(badUpdate.body.message, /dietary/i);
+});

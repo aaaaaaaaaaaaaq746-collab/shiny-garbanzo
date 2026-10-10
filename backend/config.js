@@ -124,6 +124,38 @@ const config = {
     packagingChargePerItem: Number(process.env.PACKAGING_CHARGE_PER_ITEM || 0),
     bestsellerCount: envInt("BESTSELLER_COUNT", 5),
     newItemDays: envInt("NEW_ITEM_DAYS", 7),
+    // Maximum orders per pickup slot. 0 means unlimited.
+    slotCapacity: envInt("PICKUP_SLOT_CAPACITY", 20),
+  },
+
+  // Kitchen queue model used to estimate when each order will be ready.
+  kitchen: {
+    // How many orders the kitchen works on at the same time.
+    parallel: Math.max(1, envInt("KITCHEN_PARALLEL_ORDERS", 3)),
+    // How often estimates are recalculated even when no order changes, so
+    // waiting times count down and reflect the queue as it moves.
+    etaRefreshSeconds: envInt("KITCHEN_ETA_REFRESH_SECONDS", 60),
+  },
+
+  // Outbound notifications. Each channel stays off until it is configured
+  // AND the student opts in. Nothing is sent to a real address by default.
+  notify: {
+    dispatchSeconds: envInt("NOTIFY_DISPATCH_SECONDS", 30),
+    maxAttempts: Math.max(1, envInt("NOTIFY_MAX_ATTEMPTS", 3)),
+    email: {
+      host: process.env.SMTP_HOST || "",
+      port: envInt("SMTP_PORT", 587),
+      secure: envBool("SMTP_SECURE", false),
+      user: process.env.SMTP_USER || "",
+      pass: process.env.SMTP_PASS || "",
+      from: process.env.SMTP_FROM || "",
+    },
+    push: {
+      publicKey: process.env.VAPID_PUBLIC_KEY || "",
+      privateKey: process.env.VAPID_PRIVATE_KEY || "",
+      // web-push requires a mailto: or https: contact for the push service.
+      subject: process.env.VAPID_SUBJECT || "",
+    },
   },
 };
 

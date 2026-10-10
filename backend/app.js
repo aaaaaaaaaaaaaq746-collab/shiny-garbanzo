@@ -10,6 +10,7 @@ const orderRoutes = require("./routes/order");
 const inventoryRoutes = require("./routes/inventory");
 const reviewRoutes = require("./routes/reviews");
 const couponRoutes = require("./routes/coupons");
+const notificationRoutes = require("./routes/notifications");
 
 /**
  * Build the Express application.
@@ -61,6 +62,7 @@ function createApp() {
   app.use("/api/inventory", inventoryRoutes);
   app.use("/api/reviews", reviewRoutes);
   app.use("/api/coupons", couponRoutes);
+  app.use("/api/notifications", notificationRoutes);
 
   // --- Centralized fallbacks (must be registered last) ---
   app.use(notFoundHandler);

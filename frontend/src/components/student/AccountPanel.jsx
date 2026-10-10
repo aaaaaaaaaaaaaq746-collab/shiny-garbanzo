@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import api, { setToken } from "../../api";
 import { DEFAULT_NOTIFICATION_PREFS as DEFAULT_PREFS } from "../../lib/notify";
+import { disablePush, enablePush, pushSupported } from "../../lib/push";
 
 const PREF_LABELS = [
   ["orderUpdates", "Order status updates"],
-  ["promotions", "Offers and promotions (none are sent yet)"],
+  ["promotions", "Offers and announcements from the canteen"],
   ["sound", "Sound for pickup alerts"],
+  // Email is only sent once the canteen has set up its mail server.
+  ["email", "Email me order updates (sent once the canteen's mail server is set up)"],
 ];
 
 /** Profile, notification preferences and password. */
@@ -75,6 +78,35 @@ export default function AccountPanel({ onPrefsChange }) {
     }
   };
 
+  // Push needs a browser subscription as well as the preference, so it has its
+  // own handler. Enabling subscribes first, so a refused permission leaves the
+  // preference off. Disabling saves the preference first, so a failed save
+  // does not leave the browser unsubscribed while the setting says on.
+  const togglePush = async () => {
+    setBusy(true);
+    try {
+      if (prefs.push) {
+        const next = { ...prefs, push: false };
+        await api.put("/auth/me", { notificationPrefs: { push: false } });
+        setPrefs(next);
+        onPrefsChange?.(next);
+        await disablePush(api);
+        flash("Browser notifications turned off.");
+      } else {
+        await enablePush(api);
+        const next = { ...prefs, push: true };
+        await api.put("/auth/me", { notificationPrefs: { push: true } });
+        setPrefs(next);
+        onPrefsChange?.(next);
+        flash("Browser notifications turned on.");
+      }
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const changePassword = async (e) => {
     e.preventDefault();
     if (passwords.newPassword !== passwords.confirm) {
@@ -141,6 +173,16 @@ export default function AccountPanel({ onPrefsChange }) {
             {label}
           </label>
         ))}
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={!!prefs.push}
+            disabled={busy || !pushSupported()}
+            onChange={togglePush}
+          />
+          Browser notifications when an order changes
+          {!pushSupported() && <span className="text-xs text-gray-500">(not supported in this browser)</span>}
+        </label>
       </fieldset>
 
       <form onSubmit={changePassword} className="bg-white rounded-3xl shadow p-6 max-w-xl space-y-3">

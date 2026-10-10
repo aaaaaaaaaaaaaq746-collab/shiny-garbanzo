@@ -316,9 +316,17 @@ uses the longest one. Example:
   "slotMinutes": 15,
   "estimatedPrepMinutes": 10,
   "earliestReadyAt": "2026-10-10T04:15:00.000Z",
-  "slots": [{ "at": "2026-10-10T04:30:00.000Z", "label": "2026-10-10 10:00" }]
+  "capacity": 20,
+  "slots": [
+    { "at": "2026-10-10T04:30:00.000Z", "label": "2026-10-10 10:00", "seatsLeft": 14, "available": true }
+  ]
 }
 ```
+
+`capacity` is the number of orders each slot can take (`PICKUP_SLOT_CAPACITY`,
+default 20; `0` means unlimited). Each slot gives `seatsLeft` (`null` when
+unlimited) and `available`. A full slot is listed with `available: false` so the
+client can show it, but the server still refuses it (see 8.4).
 
 Slots are on a 15-minute grid in canteen-local time (`CANTEEN_UTC_OFFSET_MINUTES`,
 default 330 for IST). They run from `CANTEEN_OPEN_HOUR` (9) to
@@ -343,8 +351,13 @@ be stored or stock cannot be reserved, the claim is released. The order's
 `orderCount` counters are updated after stock is reserved. A failed order
 updates no counter.
 
-Errors: 409 for a sold-out or unavailable item, a fully used coupon, or a closed
-pickup time. 400 for an unknown coupon or add-on, or for instructions over 140 characters.
+Errors: 409 for a sold-out or unavailable item, a fully used coupon, a closed
+pickup time, or a pickup slot that is full. A full slot returns
+`409 "That pickup slot is full. Choose another time."`. `POST /api/orders/quote`
+returns the same 409 for a full slot, so the client can warn before checkout.
+
+A seat is taken before the order is written and given back if any later step fails.
+See section 9.2. 400 for an unknown coupon or add-on, or for instructions over 140 characters.
 
 ### 8.5 Receipt: `GET /api/orders/:id/receipt`
 
@@ -380,7 +393,8 @@ route here get 403.
 
 - `PUT /api/auth/me`: now also accepts `phone`. Digits, spaces, dashes, brackets
   and a leading `+`; 7 to 15 digits; `null` or `""` clears it. Also accepts
-  `name` and `notificationPrefs` (`orderUpdates`, `promotions`, `sound`).
+  `name` and `notificationPrefs` (`orderUpdates`, `promotions`, `sound`, `email`,
+  `push`). `email` and `push` default to `false` and are opt-in. See section 9.
 - `GET /api/auth/me` returns `phone` and `notificationPrefs` as well.
 - `POST /api/auth/me/password` (rate limited): body
   `{ currentPassword, newPassword }`. A wrong current password is 400 (not 401,
@@ -413,3 +427,100 @@ With no parameters the response is the full history, newest first, as before.
 - `GET /api/food?dietary=` now rejects values outside `veg`, `non-veg`, `vegan`,
   `jain`, `egg` with 400. Previously any string was accepted and simply matched nothing.
 - `GET /api/food?sort=` keeps the same keys and 400 for unknown keys. Default order is unchanged.
+
+## 9. Live wait, pickup capacity and notifications (Phase 1 gaps)
+
+### 9.1 Estimated wait (`estimatedReadyAt`)
+
+The estimate is now recalculated as the kitchen moves, not set once at placement.
+The model is in `utils/kitchenQueue.js`. Orders are served first come, first
+served by placement time, with `KITCHEN_PARALLEL_ORDERS` (default 3) working at
+once. An order already in Preparing counts from `preparingAt`. Each order uses
+its own `prepMinutes`, which is the longest prep time among its items.
+
+The estimate is recalculated:
+
+- when an order is placed,
+- when any order changes status,
+- when an order is cancelled,
+- every `KITCHEN_ETA_REFRESH_SECONDS` (default 60), so the countdown stays current.
+
+Only orders whose estimate moved by more than 60 seconds are written. Each one
+gets a realtime `order:updated` event with its **current, unchanged** status and
+`previousStatus` equal to that status. Clients should re-read the order when they
+hear one, as they already do. The event is not a status change, so it does not
+raise the pickup alert.
+
+New order fields: `prepMinutes`, `preparingAt` (set when the order enters
+Preparing), `estimateUpdatedAt`. These are additive and default to `null` on
+older orders. `estimatedReadyAt` keeps its meaning.
+
+This is a model of the queue, not a measurement. A slow dish or a stopped
+kitchen is not seen by it. Staff still move the status, and the estimate follows.
+
+### 9.2 Pickup slot capacity
+
+`PICKUP_SLOT_CAPACITY` (default 20, `0` = unlimited) limits the orders each
+pickup slot can take. The counter is kept in the `PickupSlotCount` collection,
+keyed by the slot's start time. It is changed only by conditional updates, so two
+students cannot both take the last seat.
+
+- Placing an order takes a seat before anything is written. If the order is not
+  saved, or the coupon or stock step then fails, the seat is given back.
+- An order records whether it holds a seat, in `pickupSeatHeld`. Cancelling or
+  rejecting it releases the seat **once**. Repeating the cancel does not release
+  a second seat.
+- Orders placed before this change have no `pickupSeatHeld`. They count as
+  holding a seat. Their counter is seeded from the active orders the first time
+  the slot is used.
+- Quote and placement return 409 for a full slot. `GET /api/orders/slots` shows
+  `seatsLeft` and `available` (section 8.3).
+
+A release that fails after the order is saved is logged, not thrown, so a seat can be
+held until an operator fixes the counter. Nothing re-counts it automatically.
+
+### 9.3 Notifications: email and browser push
+
+Each order status change to Accepted, Preparing, Ready, Completed, Cancelled or Rejected (Pending is not announced) and each
+admin announcement is recorded in the `Notification` outbox. The request does
+not send anything. A background timer (`NOTIFY_DISPATCH_SECONDS`, default 30)
+sends what is pending. Each channel (email, push) has its own state: `pending`,
+`sent`, `skipped` or `failed`.
+
+A message is sent by a channel only when **all** of these hold:
+
+| Channel | Requires |
+|---|---|
+| Email | The student turned `notificationPrefs.email` on; `SMTP_HOST` and `SMTP_FROM` are set; the account has an email address; for order updates, `orderUpdates` is on. |
+| Push | The student turned `notificationPrefs.push` on and subscribed a browser; `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT` are set; for order updates, `orderUpdates` is on. |
+
+Otherwise the channel is `skipped` and the reason is kept in `lastError`. A failed
+send is retried on later timer runs, up to `NOTIFY_MAX_ATTEMPTS` (default 3), then
+marked `failed`. Each message is recorded once per transition, so it is not sent
+twice. Push subscriptions the browser service reports as gone (404 or 410) are
+removed.
+
+**Limits.** The timer runs inside one server process. Running several server
+processes would need a claim step before sends, which is not built. The
+email and push transports have **not been exercised against a real SMTP server or
+push service** in this environment. Send tests use fake transports.
+
+Endpoints (all require a logged-in student unless noted):
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/notifications/push-key` | The public VAPID key, or `{ "publicKey": null }` when push is not configured. |
+| `POST /api/notifications/push-subscriptions` | Body `{ endpoint, keys: { p256dh, auth } }`. The endpoint must be `https`. Subscribing the same endpoint again replaces it. At most 5 are kept per student; the oldest is dropped. Returns 201. |
+| `DELETE /api/notifications/push-subscriptions?endpoint=…` | Removes this browser. Returns 200. |
+| `POST /api/notifications/announcements` (admin only) | Body `{ title (≤120), body (≤500) }`. Creates one outbox entry for each student with `notificationPrefs.promotions` on, up to 5,000 students. Returns `{ recipients }`. A student who has not opted into promotions gets nothing. Non-admins get 403. |
+
+Subscription endpoints are never returned by `GET /api/auth/me`.
+
+### 9.4 Compatibility
+
+- Additive only. No existing route, field or status changes meaning. `Ready` remains the stored status.
+- No data migration is needed. New fields have defaults, and the new collections are created on first write.
+- `notificationPrefs` gains `email` and `push`, both `false` by default.
+- Realtime `order:updated` can now arrive with the same status twice in a row,
+  once for each new estimate. Clients must not treat that as a status change.
+

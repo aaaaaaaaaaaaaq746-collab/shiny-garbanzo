@@ -46,11 +46,16 @@ export default function PickupSlotPicker({ foodIdsKey, value, onChange }) {
         className="w-full border border-gray-300 rounded px-2 py-1 bg-white"
       >
         <option value="">As soon as ready</option>
-        {state.slots.map((s) => (
-          <option key={s.at} value={s.at}>
-            {s.label}
-          </option>
-        ))}
+        {state.slots.map((s) => {
+          // A full slot is shown but cannot be chosen. The server enforces this
+          // too, so a slot that fills after this list loaded gets a clear 409.
+          const full = s.available === false;
+          return (
+            <option key={s.at} value={s.at} disabled={full}>
+              {full ? `${s.label} (full)` : s.label}
+            </option>
+          );
+        })}
       </select>
       {state.loading && <p className="text-xs text-gray-500 mt-1">Loading pickup times…</p>}
       {state.error && <p className="text-xs text-red-600 mt-1">{state.error}</p>}

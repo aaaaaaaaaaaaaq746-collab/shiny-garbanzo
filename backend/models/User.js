@@ -30,6 +30,27 @@ const UserSchema = new mongoose.Schema({
     orderUpdates: { type: Boolean, default: true },
     promotions: { type: Boolean, default: false },
     sound: { type: Boolean, default: true },
+    // Off-site channels are opt-in: nothing is sent unless the student turns
+    // them on AND the owner has configured the transport.
+    email: { type: Boolean, default: false },
+    push: { type: Boolean, default: false },
+  },
+  // Browser push subscriptions. Excluded from queries by default because the
+  // endpoints are credentials for sending to this browser.
+  pushSubscriptions: {
+    type: [
+      {
+        _id: false,
+        endpoint: { type: String, required: true, maxlength: 2048 },
+        keys: {
+          p256dh: { type: String, required: true, maxlength: 200 },
+          auth: { type: String, required: true, maxlength: 200 },
+        },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    default: [],
+    select: false,
   },
 }, {
   timestamps: true,
@@ -68,6 +89,8 @@ UserSchema.methods.toPublicJSON = function () {
       orderUpdates: this.notificationPrefs?.orderUpdates ?? true,
       promotions: this.notificationPrefs?.promotions ?? false,
       sound: this.notificationPrefs?.sound ?? true,
+      email: this.notificationPrefs?.email ?? false,
+      push: this.notificationPrefs?.push ?? false,
     },
   };
 };

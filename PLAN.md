@@ -119,21 +119,24 @@ MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 | Quantities, saved cart | Done | `src/lib/cart.js` (+ `tests/unit/cart.test.js`). |
 | Add-ons and special instructions | Done | `utils/pricing.js` `priceLine` (+ `studentPricing.test.js`). Add-on prices come from the menu. |
 | Pickup slots and estimated prep | Done | `utils/pickupSlots.js`; `GET /api/orders/slots`; the server rejects off-grid and closed times (`studentCheckout.test.js`). |
+| Pickup slot capacity | **Done, unverified (DB)** | `PICKUP_SLOT_CAPACITY` (default 20, 0 = unlimited). Seats are counted in `PickupSlotCount` with conditional updates (`services/pickupCapacity.js`, `utils/pickupCapacity.js`). Full slots return 409 at quote and placement and are marked `available: false`. A cancel or rejection releases the seat once. Pure seat math is tested (`notificationPlan.test.js`, last group). DB tests in `studentFeatures.test.js` are not run. |
 | Itemized bill: discounts and charges | Done | `buildBill` (+ `studentPricing.test.js`); `POST /api/orders/quote`. |
 | Unavailable items blocked | Done | `services/checkout.js` returns 409. Stock-tracked items are counted across all lines. |
-| Status labels, timeline, timestamps, estimated wait, cancel eligibility, realtime | Done (wording) | Students read "Pending confirmation" and "Ready for pickup"; the stored values are unchanged (`statusLabel` in `orderStatus.js`). The kitchen board shares the timeline and shows the same wording. Estimated wait is set once, at placement, and is not recalculated as the kitchen progresses. |
+| Status labels, timeline, timestamps, estimated wait, cancel eligibility, realtime | Done (wording); live wait **Done, unverified (DB)** | Students read "Pending confirmation" and "Ready for pickup"; the stored values are unchanged (`statusLabel` in `orderStatus.js`). The kitchen board shares the timeline and shows the same wording. The estimated wait is recalculated on placement, status change, cancel, and every `KITCHEN_ETA_REFRESH_SECONDS` (`utils/kitchenQueue.js`, `services/kitchenEta.js`). Only changes over 60 seconds are written and emitted. The model is a FIFO estimate, not a measurement (`kitchenQueue.test.js`). |
 | Profile, password, favourites, reorder | Done | `PUT /api/auth/me` (phone); `POST /api/auth/me/password` (revokes other sessions); reorder merges lines. |
 | Reviews after completion | Done | `routes/reviews.js` (one per item per order, unique index, atomic average). Students can read written reviews from the food card (`ReviewsToggle` in `student/FoodCard.jsx`). |
-| History filters, receipts, notification preferences | Done (in-app only) | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`. `orderUpdates` gates the pickup alert and `sound` plays a chime (`lib/notify.js`). `promotions` has no effect yet because no promotions are sent. Email and push delivery are not built. |
+| History filters, receipts, notification preferences | Done; email and push **built, unverified against real services** | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`. `orderUpdates` gates the pickup alert and `sound` plays a chime (`lib/notify.js`). Email and browser push are built as an outbox with per-channel state, retries and a dispatch timer (`services/notifications.js`, `utils/notificationPlan.js`, `routes/notifications.js`). Both are opt-in per student and need server configuration. `promotions` now drives admin announcements (`POST /api/notifications/announcements`). Delivery was tested with fake transports only. No real SMTP server or push service was contacted. |
 | Payments and refunds | **Not in scope** | The app records `paymentStatus` only. No money moves. See the open decisions. |
 
 The DB-backed tests for these routes are in `backend/test/studentFeatures.test.js`.
 They have not been run.
 
-Known gaps in this phase, stated plainly: the estimated wait is not recalculated
-during preparation; pickup slots have no capacity limit; no payments or refunds;
-no email or push notifications; the editor and reviews toggle were checked by
-server-side render only, not clicked in a browser.
+Known gaps in this phase, stated plainly: no payments or refunds; the wait
+estimate is a queue model, not a measurement; the notification dispatcher runs in one
+server process only; email and push were not tested against real services; the
+new database-backed tests were not run in this sandbox (no MongoDB binary); the
+editor and reviews toggle were checked by server-side render only, not clicked in
+a browser.
 
 ## Known limitations (documented, not fixed)
 
