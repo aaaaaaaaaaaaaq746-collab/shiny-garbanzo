@@ -161,6 +161,7 @@ implemented in this codebase. The remaining real defects are the new items below
 | N11 | Test workflow | Backend tests require a network download of MongoDB at run time; no documented offline path (`MONGOMS_SYSTEM_BINARY`, version pin, or CI cache). | `backend/test/helpers.js` |
 | N12 | Docs | Root README is only a title. Frontend README is the Vite template. Setup steps are only in `.env.example` comments. | `README.md`, `frontend/README.md` |
 | N13 | Auth | Logout does not revoke tokens (no `tokenVersion`). Password change/reset doesn't exist, so there is nothing to revoke on. | `routes/auth.js` |
+| N14 | High | (Found in Phase 2.) Inventory counter changes run before the ledger row is claimed, so duplicate concurrent movements can double-apply `reserved`/`stock`. Tracked as P2-R1 in `PLAN.md`. | `services/inventory.js` |
 
 ---
 
