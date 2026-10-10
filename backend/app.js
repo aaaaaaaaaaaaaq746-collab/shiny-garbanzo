@@ -8,6 +8,8 @@ const authRoutes = require("./routes/auth");
 const foodRoutes = require("./routes/food");
 const orderRoutes = require("./routes/order");
 const inventoryRoutes = require("./routes/inventory");
+const reviewRoutes = require("./routes/reviews");
+const couponRoutes = require("./routes/coupons");
 
 /**
  * Build the Express application.
@@ -57,6 +59,8 @@ function createApp() {
   app.use("/api/food", foodRoutes);
   app.use("/api/orders", orderRoutes);
   app.use("/api/inventory", inventoryRoutes);
+  app.use("/api/reviews", reviewRoutes);
+  app.use("/api/coupons", couponRoutes);
 
   // --- Centralized fallbacks (must be registered last) ---
   app.use(notFoundHandler);

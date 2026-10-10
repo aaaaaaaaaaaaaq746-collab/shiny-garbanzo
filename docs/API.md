@@ -241,3 +241,173 @@ The ledger row records the difference between the old and new stock figures, so
 the ledger explains the change. Repeating the request with a new stock value
 records only the difference.
 
+## 8. Student experience (Phase 1 of the feature spec)
+
+All routes need a bearer token unless marked public. Money fields are rupees.
+Errors use the standard body `{ message, ... }`. Validation errors are 400,
+ownership failures are 403, missing resources are 404, and state conflicts
+(closed slot, sold out, used-up coupon, already reviewed) are 409.
+
+### 8.1 Menu discovery: `GET /api/food` (public)
+
+With no parameters the response is the full menu array, as before. Each item now
+also has `badges: { featured, bestselling, isNew }`.
+
+| Query | Meaning |
+|---|---|
+| `search` (or `q`) | Matches name, description or category. Case-insensitive. Max 100 characters. |
+| `category` | Exact category. |
+| `dietary` | Exact value: `veg`, `non-veg`, `vegan`, `jain`, `egg`. Other values are 400. |
+| `veg` | `veg` (veg, vegan, jain) or `nonveg` (non-veg, egg). Other values are 400. |
+| `minPrice`, `maxPrice` | Numbers from 0 to 100000. `minPrice` above `maxPrice` is 400. |
+| `available` | `true` or `false`. |
+| `featured` | `true` returns featured items only. |
+| `sort` | `name`, `name_desc`, `price_asc`, `price_desc`, `newest`, `popularity` (most ordered), `rating` (top rated). Other values are 400. |
+
+Bestseller badges are computed over the whole menu: the top
+`BESTSELLER_COUNT` (default 5) items by units ordered. Items never ordered are
+not bestsellers. The New badge covers items created in the last
+`NEW_ITEM_DAYS` (default 7).
+
+`GET /api/food/:id` (public) returns one item with its badges. `GET /api/food/categories`
+is unchanged.
+
+Admin or staff may set on `POST /api/food` and `PUT /api/food/:id`:
+`featured` (boolean), `addOns` (up to 10 of `{ label, price }`, labels unique,
+price 0 to 1000), `ingredients` and `allergens` (up to 30 short strings each).
+Stock fields remain admin-only, as in section 7.
+
+### 8.2 Price a cart: `POST /api/orders/quote`
+
+Body: `{ items, couponCode?, pickupAt? }`, where each item is
+`{ food, quantity, addOns?, specialInstructions? }`. `addOns` is a list of
+add-on labels defined on the menu item.
+
+Returns `200`:
+
+```json
+{
+  "lines": [{ "food": "…", "name": "Dosa", "basePrice": 50, "addOns": [{ "label": "Extra chutney", "price": 5 }], "unitPrice": 55, "quantity": 2, "lineTotal": 110, "specialInstructions": null }],
+  "bill": { "subtotal": 110, "discount": 11, "couponCode": "OFF10", "charges": [{ "label": "Packaging", "amount": 4 }, { "label": "Tax (5%)", "amount": 4.95 }], "total": 107.95, "itemCount": 2 },
+  "pickupAt": null,
+  "estimatedPrepMinutes": 10
+}
+```
+
+Nothing is written and no stock is reserved. The bill is computed by the same
+code as `POST /api/orders`, so the two totals match. Prices never come from the
+client.
+
+Errors: 400 for an unknown add-on, a missing item, a bad coupon, or a bad
+pickup format. 409 for an unavailable or sold-out item, or a pickup time that is
+not an open slot.
+
+### 8.3 Pickup slots: `GET /api/orders/slots`
+
+Optional `foods=<id>,<id>,…` (up to 50). The server looks up their prep times and
+uses the longest one. Example:
+
+```json
+{
+  "name": "College Canteen",
+  "utcOffsetMinutes": 330,
+  "slotMinutes": 15,
+  "estimatedPrepMinutes": 10,
+  "earliestReadyAt": "2026-10-10T04:15:00.000Z",
+  "slots": [{ "at": "2026-10-10T04:30:00.000Z", "label": "2026-10-10 10:00" }]
+}
+```
+
+Slots are on a 15-minute grid in canteen-local time (`CANTEEN_UTC_OFFSET_MINUTES`,
+default 330 for IST). They run from `CANTEEN_OPEN_HOUR` (9) to
+`CANTEEN_CLOSE_HOUR` (18) across `PICKUP_SLOT_DAYS` (2) days. They start no
+earlier than the earliest ready time, which is the longest prep time plus
+`PREP_BUFFER_MINUTES` (5).
+
+### 8.4 Place an order: `POST /api/orders`
+
+Body: `{ items, pickupAt?, couponCode?, pickupSlot?, notes? }`. Each item takes
+`{ food, quantity, addOns?, specialInstructions? }`. `specialInstructions` is at
+most 140 characters. `pickupAt` must be an open slot from 8.3. Omit it for "as
+soon as ready".
+
+Returns `201` with the order. New fields: `subtotal`, `discount`, `charges`,
+`couponCode`, `pickupAt`. Items gain `basePrice`, `addOns` and
+`specialInstructions`. Here `price` is the unit price **including** add-ons,
+so `price x quantity` equals the line total.
+
+A coupon is claimed atomically before the order is written. If the order cannot
+be stored or stock cannot be reserved, the claim is released. The order's
+`orderCount` counters are updated after stock is reserved. A failed order
+updates no counter.
+
+Errors: 409 for a sold-out or unavailable item, a fully used coupon, or a closed
+pickup time. 400 for an unknown coupon or add-on, or for instructions over 140 characters.
+
+### 8.5 Receipt: `GET /api/orders/:id/receipt`
+
+Owner or staff only (403 for another student, 404 if missing). Returns
+`text/plain; charset=utf-8` with `Content-Disposition: inline`. The receipt
+shows the stored `paymentStatus` as recorded. No payment or refund is created.
+
+### 8.6 Reviews
+
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `POST /api/reviews` | Owner | Body `{ orderId, foodId, rating (1-5 integer), comment? (max 500) }`. Allowed only when the order is `Completed`, the item is in that order, and the item is not already reviewed for that order. Returns 201. |
+| `GET /api/reviews/food/:foodId` | Public | `{ average, count, reviews: [{ id, rating, comment, createdAt }] }`, newest first, up to 50. No reviewer identity. |
+| `GET /api/reviews/order/:orderId` | Owner | The student's reviews for one order: `[{ foodId, rating, comment }]`. |
+
+Errors: 403 when the caller does not own the order, 409 when the order is not
+Completed or the item is already reviewed, 400 for an item not in the order.
+The item's `ratingAverage` and `ratingCount` update in one atomic write. A unique
+index on `(order, food)` also stops a double submit.
+
+### 8.7 Coupons (admin only)
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/coupons` | List all coupons. |
+| `POST /api/coupons` | Body `{ code, type: "percent"|"flat", value, minSubtotal?, maxDiscount?, expiresAt?, usageLimit?, active? }`. Codes are stored upper-case, 3 to 40 letters, digits, `-` or `_`. Duplicate code: 409. A percentage above 100 is 400. |
+| `PATCH /api/coupons/:id` | Body `{ active?, expiresAt?, usageLimit? }`. A usage limit cannot go below the number already used. |
+
+Students use a code by passing `couponCode` to 8.2 or 8.4. Students who call a
+route here get 403.
+
+### 8.8 Account
+
+- `PUT /api/auth/me`: now also accepts `phone`. Digits, spaces, dashes, brackets
+  and a leading `+`; 7 to 15 digits; `null` or `""` clears it. Also accepts
+  `name` and `notificationPrefs` (`orderUpdates`, `promotions`, `sound`).
+- `GET /api/auth/me` returns `phone` and `notificationPrefs` as well.
+- `POST /api/auth/me/password` (rate limited): body
+  `{ currentPassword, newPassword }`. A wrong current password is 400 (not 401,
+  so the client does not treat it as an expired session). A new password must be
+  at least 8 characters and different from the current one. On success the
+  account's `tokenVersion` is incremented, so **every other session stops
+  working**. The response is `{ message, token }`; the new token replaces the
+  old one on this device.
+
+### 8.9 Order history filters: `GET /api/orders`
+
+Optional query parameters, applied to the caller's own orders:
+
+| Parameter | Meaning |
+|---|---|
+| `status` | One or more statuses, comma-separated. Unknown values are 400. |
+| `from`, `to` | `YYYY-MM-DD`, UTC, inclusive. `from` after `to` is 400. |
+| `limit` | 1 to 500. Omitted means no limit. |
+
+With no parameters the response is the full history, newest first, as before.
+
+### 8.10 Compatibility
+
+- Existing routes, response fields and status values are unchanged. New fields
+  are additive.
+- Order items written before this change have no `basePrice`, `addOns` or
+  `specialInstructions`. Consumers should treat them as absent.
+- Existing order totals are unchanged. For a cart with no coupon and no charges,
+  `total` still equals `subtotal`.
+- `GET /api/food?dietary=` now rejects values outside `veg`, `non-veg`, `vegan`,
+  `jain`, `egg` with 400. Previously any string was accepted and simply matched nothing.
+- `GET /api/food?sort=` keeps the same keys and 400 for unknown keys. Default order is unchanged.

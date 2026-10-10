@@ -107,6 +107,24 @@ const config = {
     // silently lost.
     statusHistoryLimit: envInt("ORDER_STATUS_HISTORY_LIMIT", 100),
   },
+
+  // Student-facing canteen settings (pickup slots, charges, menu badges).
+  // Defaults keep existing behaviour: no tax, no packaging charge.
+  canteen: {
+    name: process.env.CANTEEN_NAME || "College Canteen",
+    // Offset from UTC in minutes for slot boundaries. 330 = India (IST).
+    utcOffsetMinutes: envInt("CANTEEN_UTC_OFFSET_MINUTES", 330),
+    openHour: envInt("CANTEEN_OPEN_HOUR", 9),
+    closeHour: envInt("CANTEEN_CLOSE_HOUR", 18),
+    slotMinutes: envInt("PICKUP_SLOT_MINUTES", 15),
+    slotDays: envInt("PICKUP_SLOT_DAYS", 2),
+    // Extra minutes added to the longest prep time before the earliest slot.
+    prepBufferMinutes: envInt("PREP_BUFFER_MINUTES", 5),
+    taxPercent: Number(process.env.TAX_PERCENT || 0),
+    packagingChargePerItem: Number(process.env.PACKAGING_CHARGE_PER_ITEM || 0),
+    bestsellerCount: envInt("BESTSELLER_COUNT", 5),
+    newItemDays: envInt("NEW_ITEM_DAYS", 7),
+  },
 };
 
 module.exports = config;

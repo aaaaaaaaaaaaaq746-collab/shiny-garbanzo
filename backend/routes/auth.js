@@ -95,6 +95,7 @@ router.put("/me", authMiddleware, async (req, res) => {
   const user = req.user;
 
   if (body.name !== undefined) user.name = v.name(body.name);
+  if (body.phone !== undefined) user.phone = parsePhone(body.phone);
   if (body.notificationPrefs !== undefined) {
     const prefs = v.object(body.notificationPrefs, "notificationPrefs");
     for (const key of ["orderUpdates", "promotions", "sound"]) {
@@ -106,6 +107,55 @@ router.put("/me", authMiddleware, async (req, res) => {
 
   await user.save();
   res.json(user.toPublicJSON());
+});
+
+/**
+ * Phone number for pickup contact. Optional: null or "" clears it.
+ * Accepts digits with optional spaces, dashes, brackets and a leading +.
+ */
+function parsePhone(value) {
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") throw ApiError.badRequest("phone must be text");
+  const trimmed = value.trim();
+  if (!/^\+?[0-9 ()-]+$/.test(trimmed)) {
+    throw ApiError.badRequest("phone may contain only digits, spaces, dashes, brackets and a leading +");
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 7 || digits.length > 15) {
+    throw ApiError.badRequest("phone must have between 7 and 15 digits");
+  }
+  return trimmed;
+}
+
+/**
+ * Change the signed-in user's password.
+ *
+ * Requires the current password. Bumps tokenVersion, so every other session
+ * stops working, and returns a fresh token for this one. The new token replaces
+ * the old one on the client. Wrong current password is a 400, not a 401, so the
+ * client does not treat it as an expired session.
+ */
+router.post("/me/password", authLimiter, authMiddleware, async (req, res) => {
+  const body = v.object(req.body);
+  if (typeof body.currentPassword !== "string" || !body.currentPassword) {
+    throw ApiError.badRequest("currentPassword is required");
+  }
+  const newPassword = v.password(body.newPassword, "newPassword");
+
+  const user = await User.findById(req.user._id).select("+password");
+  if (!user) throw ApiError.notFound("User not found");
+
+  const matches = await user.comparePassword(body.currentPassword);
+  if (!matches) throw ApiError.badRequest("Current password is incorrect");
+  if (await user.comparePassword(newPassword)) {
+    throw ApiError.badRequest("New password must be different from the current password");
+  }
+
+  user.password = newPassword;
+  user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+  await user.save();
+
+  res.json({ message: "Password changed", token: issueToken(user) });
 });
 
 // Favorites (add/remove/toggle) — additive, used by Phase 3.

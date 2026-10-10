@@ -4,6 +4,14 @@ const DIETARY = ["veg", "non-veg", "vegan", "jain", "egg"];
 
 const UNITS = ["servings", "pieces", "portions", "packs", "kg", "litres"];
 
+const addOnSchema = new mongoose.Schema(
+  {
+    label: { type: String, required: true, trim: true, maxlength: 60 },
+    price: { type: Number, required: true, min: 0, default: 0 },
+  },
+  { _id: false }
+);
+
 const foodSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 120 },
@@ -24,6 +32,21 @@ const foodSchema = new mongoose.Schema(
     spicy: { type: Boolean, default: false },
     prepTimeMinutes: { type: Number, min: 0, max: 240, default: 15 },
     lowStockThreshold: { type: Number, min: 0, default: 5 },
+
+    // ---- Phase 1 student-experience fields (additive, all defaulted). ----
+    // Set by an administrator to show a "Featured" badge.
+    featured: { type: Boolean, default: false },
+    // Optional extras a student can select, each with its own price.
+    addOns: { type: [addOnSchema], default: [] },
+    ingredients: { type: [String], default: [] },
+    allergens: { type: [String], default: [] },
+    // Units ordered over the item's lifetime. Drives bestseller and popularity.
+    orderCount: { type: Number, min: 0, default: 0 },
+    // Rating aggregate maintained by the review route. ratingAverage is stored
+    // so the list can be sorted by rating without a join.
+    ratingSum: { type: Number, min: 0, default: 0 },
+    ratingCount: { type: Number, min: 0, default: 0 },
+    ratingAverage: { type: Number, min: 0, max: 5, default: 0 },
 
     // ---------------------------------------------------------------------
     // Phase 4 inventory fields.
@@ -60,6 +83,8 @@ foodSchema.index({ name: "text", description: "text", category: "text" });
 foodSchema.index({ category: 1 });
 foodSchema.index({ available: 1 });
 foodSchema.index({ trackInventory: 1 });
+foodSchema.index({ orderCount: -1 });
+foodSchema.index({ ratingAverage: -1 });
 
 /**
  * Quantity a new order may still take.

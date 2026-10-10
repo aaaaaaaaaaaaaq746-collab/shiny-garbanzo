@@ -10,6 +10,11 @@ const ApiError = require("../utils/ApiError");
 const v = require("../utils/validators");
 const { emitOrderUpdate } = require("../realtime");
 const inventory = require("../services/inventory");
+const { resolveCart, openSlotsFor, pricingConfig } = require("../services/checkout");
+const Coupon = require("../models/Coupon");
+const { renderReceipt } = require("../utils/receipt");
+const { parseOrderHistoryQuery, buildHistoryFilter } = require("../utils/orderHistory");
+const slots = require("../utils/pickupSlots");
 const {
   STATUS,
   ORDER_STATUSES,
@@ -22,8 +27,8 @@ const {
 
 const router = express.Router();
 
-const { maxQuantityPerItem, maxItemsPerOrder, strictLifecycle, statusHistoryLimit } =
-  config.order;
+const { strictLifecycle, statusHistoryLimit } = config.order;
+const canteen = config.canteen;
 
 // Statuses shown on the kitchen display: everything still in progress.
 const KITCHEN_STATUSES = ["Pending", "Accepted", "Preparing", "Ready"];
@@ -231,105 +236,122 @@ function decorate(order, user) {
  * price tampering is impossible. The original implementation trusted the
  * submitted `total` and per-item `price` outright.
  */
+function publicLine(line) {
+  return {
+    food: line.food,
+    name: line.name,
+    basePrice: line.basePrice,
+    addOns: line.addOns,
+    unitPrice: line.price,
+    quantity: line.quantity,
+    lineTotal: line.lineTotal,
+    specialInstructions: line.specialInstructions,
+  };
+}
+
+/**
+ * Preview the bill for a cart without reserving stock or writing anything.
+ *
+ * Uses the same resolution as placing an order, so the total shown here is the
+ * total the order is stored with.
+ */
+router.post("/quote", authMiddleware, async (req, res) => {
+  const body = v.object(req.body);
+  const { lines, bill, pickupAt, maxPrep } = await resolveCart(body);
+  res.json({
+    lines: lines.map(publicLine),
+    bill,
+    pickupAt: pickupAt ? pickupAt.toISOString() : null,
+    estimatedPrepMinutes: maxPrep,
+  });
+});
+
+/**
+ * Place an order.
+ *
+ * SECURITY: the client sends only `{ food, quantity, addOns?, specialInstructions? }`
+ * per line plus optional `pickupAt` and `couponCode`. Names, prices, add-on
+ * prices, discounts, charges and totals are all computed here from the
+ * database. Price tampering is impossible.
+ */
 router.post("/", authMiddleware, async (req, res) => {
   const body = v.object(req.body);
+  const { lines, bill, coupon, pickupAt, maxPrep } = await resolveCart(body);
 
-  const rawItems = v.array(body.items, { field: "items", max: maxItemsPerOrder });
-  if (rawItems.length === 0) throw ApiError.badRequest("Cart is empty");
-
-  // Validate every line first, then collapse duplicates.
-  const requested = new Map();
-  rawItems.forEach((raw, index) => {
-    const item = v.object(raw, `items[${index}]`);
-    const foodId = v.objectId(item.food, `items[${index}].food`);
-    const qty = v.quantity(item.quantity, {
-      field: `items[${index}].quantity`,
-      min: 1,
-      max: maxQuantityPerItem,
-    });
-
-    const next = (requested.get(foodId) || 0) + qty;
-    if (next > maxQuantityPerItem) {
-      throw ApiError.badRequest(
-        `items[${index}].quantity exceeds the maximum of ${maxQuantityPerItem} per item`
-      );
-    }
-    requested.set(foodId, next);
-  });
-
-  const foodIds = [...requested.keys()];
-  const foods = await Food.find({ _id: { $in: foodIds } });
-
-  // Detect ids that do not exist without leaking which one.
-  if (foods.length !== foodIds.length) {
-    throw ApiError.badRequest("Cart contains an item that no longer exists");
-  }
-
-  const byId = new Map(foods.map((f) => [f._id.toString(), f]));
-
-  const items = [];
-  let subtotal = 0;
-  let maxPrep = 0;
-
-  for (const [foodId, qty] of requested) {
-    const food = byId.get(foodId);
-
-    if (food.available === false) {
-      throw ApiError.conflict(`"${food.name}" is currently unavailable`);
-    }
-
-    // Single source of truth for "can still be sold".
-    //   tracked items : available = stock - reserved
-    //   legacy items  : the Phase 1 `stock` value, or unlimited when null
-    const sellable = food.sellableQty();
-    if (sellable !== Infinity && sellable < qty) {
-      throw ApiError.conflict(
-        sellable <= 0
-          ? `"${food.name}" is sold out`
-          : `Only ${sellable} of "${food.name}" left`
-      );
-    }
-
-    const unitPrice = v.roundMoney(food.price);
-    subtotal = v.roundMoney(subtotal + unitPrice * qty);
-    maxPrep = Math.max(maxPrep, food.prepTimeMinutes || 0);
-
-    items.push({
-      food: food._id,
-      // Snapshotted from the database, never from the request.
-      name: food.name,
-      price: unitPrice,
-      quantity: qty,
-      // Phase 4: remember whether this line participates in stock accounting.
-      inventoryTracked: food.trackInventory === true,
-      reservedQty: food.trackInventory === true ? qty : null,
-    });
-  }
-
-  const total = v.roundMoney(subtotal);
-
-  const order = await Order.create({
-    student: req.user._id,
-    items,
-    subtotal,
-    discount: 0,
-    total,
-    status: STATUS.PENDING,
-    statusHistory: [
+  // Claim one use of a limited coupon atomically before writing the order.
+  // The conditional update means two checkouts cannot both take the last use.
+  let couponClaimed = false;
+  if (coupon) {
+    const claim = await Coupon.updateOne(
       {
-        status: STATUS.PENDING,
-        from: null,
-        at: new Date(),
-        by: req.user._id,
-        role: req.user.role,
-        reason: null,
+        _id: coupon._id,
+        // Unlimited (null or missing usageLimit), or still below the limit.
+        $expr: {
+          $or: [
+            { $eq: [{ $ifNull: ["$usageLimit", null] }, null] },
+            { $lt: ["$usedCount", "$usageLimit"] },
+          ],
+        },
       },
-    ],
-    statusHistoryTotal: 1,
-    estimatedReadyAt: maxPrep ? new Date(Date.now() + maxPrep * 60 * 1000) : null,
-    pickupSlot: v.optionalString(body.pickupSlot, { field: "pickupSlot", max: 60 }) || null,
-    notes: v.optionalString(body.notes, { field: "notes", max: 300 }) || null,
-  });
+      { $inc: { usedCount: 1 } }
+    );
+    if (claim.modifiedCount !== 1) {
+      throw ApiError.conflict("This coupon has been fully used");
+    }
+    couponClaimed = true;
+  }
+  const releaseCoupon = () => {
+    if (couponClaimed) {
+      Coupon.updateOne({ _id: coupon._id }, { $inc: { usedCount: -1 } }).catch(() => {});
+    }
+  };
+
+  const items = lines.map((l) => ({
+    food: l.food,
+    // Snapshotted from the database, never from the request.
+    name: l.name,
+    price: l.price,
+    basePrice: l.basePrice,
+    addOns: l.addOns,
+    quantity: l.quantity,
+    specialInstructions: l.specialInstructions,
+    // Phase 4: remember whether this line participates in stock accounting.
+    inventoryTracked: l.inventoryTracked,
+    reservedQty: l.reservedQty,
+  }));
+
+  const now = new Date();
+  let order;
+  try {
+    order = await Order.create({
+      student: req.user._id,
+      items,
+      subtotal: bill.subtotal,
+      discount: bill.discount,
+      charges: bill.charges,
+      couponCode: bill.couponCode,
+      total: bill.total,
+      status: STATUS.PENDING,
+      statusHistory: [
+        {
+          status: STATUS.PENDING,
+          from: null,
+          at: now,
+          by: req.user._id,
+          role: req.user.role,
+          reason: null,
+        },
+      ],
+      statusHistoryTotal: 1,
+      estimatedReadyAt: maxPrep ? new Date(Date.now() + maxPrep * 60 * 1000) : null,
+      pickupAt,
+      pickupSlot: v.optionalString(body.pickupSlot, { field: "pickupSlot", max: 60 }) || null,
+      notes: v.optionalString(body.notes, { field: "notes", max: 300 }) || null,
+    });
+  } catch (err) {
+    releaseCoupon();
+    throw err;
+  }
 
   // ---------------------------------------------------------------------
   // Phase 4: commit stock BEFORE acknowledging the order.
@@ -343,6 +365,7 @@ router.post("/", authMiddleware, async (req, res) => {
   } catch (err) {
     // Compensating delete: the order was never acknowledged to the client.
     await Order.deleteOne({ _id: order._id }).catch(() => {});
+    releaseCoupon();
     if (err instanceof inventory.InventoryError) {
       throw ApiError.conflict(err.message);
     }
@@ -357,6 +380,14 @@ router.post("/", authMiddleware, async (req, res) => {
       { arrayFilters: [{ "el.inventoryTracked": true }] }
     ).catch(() => {});
   }
+
+  // Popularity counter for bestseller and "most ordered" ranking.
+  await Food.bulkWrite(
+    items.map((i) => ({
+      updateOne: { filter: { _id: i.food }, update: { $inc: { orderCount: i.quantity } } },
+    })),
+    { ordered: false }
+  ).catch(() => {});
 
   const fresh = await Order.findById(order._id);
   const response = decorate(fresh || order, req.user);
@@ -386,10 +417,45 @@ router.get("/all", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
   res.json(orders.map((o) => decorate(o, req.user)));
 });
 
-// Student: get their own orders
+// Student: get their own orders. Optional filters: status, from, to, limit.
+// With no parameters this returns the full history, as before.
 router.get("/", authMiddleware, async (req, res) => {
-  const orders = await Order.find({ student: req.user._id }).sort({ date: -1 });
+  const opts = parseOrderHistoryQuery(req.query);
+  let query = Order.find(buildHistoryFilter(req.user._id, opts)).sort({ date: -1 });
+  if (opts.limit) query = query.limit(opts.limit);
+  const orders = await query;
   res.json(orders.map((o) => decorate(o, req.user)));
+});
+
+/**
+ * Open pickup slots.
+ *
+ * `foods=<id,id,...>` (optional) lets the server work out the longest prep time
+ * for the cart, so the earliest slot is never earlier than the food can be
+ * ready. Prep times come from the database, not from the client.
+ */
+router.get("/slots", authMiddleware, async (req, res) => {
+  let maxPrep = 0;
+  const raw = req.query.foods;
+  if (raw !== undefined && raw !== "") {
+    const ids = String(raw).split(",").map((x) => x.trim()).filter(Boolean);
+    if (ids.length > 50) throw ApiError.badRequest("At most 50 foods can be checked at once");
+    ids.forEach((id) => v.objectId(id, "foods"));
+    const foods = await Food.find({ _id: { $in: ids } }, { prepTimeMinutes: 1 });
+    maxPrep = foods.reduce((m, f) => Math.max(m, f.prepTimeMinutes || 0), 0);
+  }
+  const now = Date.now();
+  const open = openSlotsFor(now, maxPrep);
+  res.json({
+    name: canteen.name,
+    utcOffsetMinutes: canteen.utcOffsetMinutes,
+    slotMinutes: canteen.slotMinutes,
+    estimatedPrepMinutes: maxPrep,
+    earliestReadyAt: new Date(
+      slots.earliestReadyAt(now, maxPrep, canteen.prepBufferMinutes)
+    ).toISOString(),
+    slots: slots.describeSlots(open, canteen.utcOffsetMinutes),
+  });
 });
 
 /**
@@ -417,6 +483,31 @@ router.get("/kitchen", authMiddleware, adminOrStaffMiddleware, async (req, res) 
 
   res.json(feed);
 });
+/**
+ * Plain-text receipt for one order. Owner or staff only.
+ *
+ * The receipt reports the stored payment status. No payment or refund is
+ * created by this route.
+ */
+router.get("/:id/receipt", authMiddleware, async (req, res) => {
+  const id = v.objectId(req.params.id, "order id");
+  const order = await Order.findById(id);
+  if (!order) throw ApiError.notFound("Order not found");
+
+  const isStaff = ["admin", "staff"].includes(req.user.role);
+  if (!isStaff && order.student.toString() !== req.user._id.toString()) {
+    throw ApiError.forbidden("You can only view receipts for your own orders");
+  }
+
+  const text = renderReceipt(order.toObject(), {
+    canteenName: canteen.name,
+    utcOffsetMinutes: canteen.utcOffsetMinutes,
+  });
+  res.type("text/plain; charset=utf-8");
+  res.setHeader("Content-Disposition", `inline; filename="receipt-${order._id}.txt"`);
+  res.send(text);
+});
+
 // Single order — only the owner or staff may read it.
 router.get("/:id", authMiddleware, async (req, res) => {
   const id = v.objectId(req.params.id, "order id");

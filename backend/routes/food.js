@@ -8,6 +8,8 @@ const ApiError = require("../utils/ApiError");
 const v = require("../utils/validators");
 const inventory = require("../services/inventory");
 const { UNITS } = require("../models/FoodItem");
+const config = require("../config");
+const { parseFoodQuery, badgesFor, bestsellerIdSet } = require("../utils/discovery");
 
 const router = express.Router();
 
@@ -26,59 +28,98 @@ const WRITABLE_FIELDS = [
   "lowStockThreshold",
 ];
 
-const SORT_MAP = {
-  name: { name: 1 },
-  name_desc: { name: -1 },
-  price_asc: { price: 1 },
-  price_desc: { price: -1 },
-  newest: { createdAt: -1 },
-};
+/**
+ * Parse a list of short strings (ingredients, allergens) from a request body.
+ * Trimmed, de-duplicated and bounded so the menu document stays small.
+ */
+function stringList(value, { field, max = 30, itemMax = 60 }) {
+  const list = v.array(value, { field, max });
+  const out = [];
+  for (const raw of list) {
+    if (typeof raw !== "string") throw ApiError.badRequest(`${field} must contain only text`);
+    const t = raw.trim();
+    if (!t) continue;
+    if (t.length > itemMax) throw ApiError.badRequest(`Each ${field} entry must be at most ${itemMax} characters`);
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+/** Add-on list: [{ label, price }], at most 10. Prices are validated as money. */
+function addOnList(value) {
+  const list = v.array(value, { field: "addOns", max: 10 });
+  const seen = new Set();
+  return list.map((raw, index) => {
+    const a = v.object(raw, `addOns[${index}]`);
+    const label = v.optionalString(a.label, { field: `addOns[${index}].label`, max: 60 });
+    if (!label) throw ApiError.badRequest(`addOns[${index}].label is required`);
+    if (seen.has(label.toLowerCase())) {
+      throw ApiError.badRequest(`Duplicate add-on "${label}"`);
+    }
+    seen.add(label.toLowerCase());
+    const price = a.price === undefined ? 0 : v.roundMoney(Number(a.price));
+    if (!Number.isFinite(price) || price < 0 || price > 1000) {
+      throw ApiError.badRequest(`addOns[${index}].price must be between 0 and 1000`);
+    }
+    return { label, price };
+  });
+}
 
 /**
  * List menu items.
  *
- * With no query parameters this returns a plain array, exactly as the original
- * route did, so existing consumers are unaffected. Supplying `search`,
- * `category`, `sort`, `available` or `dietary` filters server-side.
+ * With no query parameters this returns a plain array, exactly as before.
+ * Filters: search/q, category, dietary, veg (veg|nonveg), available, minPrice,
+ * maxPrice, featured. Sorts: name, name_desc, price_asc, price_desc, newest,
+ * popularity, rating. Each item gains a `badges` object (featured,
+ * bestselling, isNew); the rest of the document is unchanged.
  */
 router.get("/", async (req, res) => {
-  const query = {};
+  const { filter, sort } = parseFoodQuery(req.query);
 
-  const search = v.optionalString(req.query.search, { field: "search", max: 100 });
-  if (search) {
-    const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-    query.$or = [{ name: rx }, { description: rx }, { category: rx }];
-  }
+  const foods = await Food.find(filter).sort(sort);
 
-  if (req.query.category) {
-    query.category = v.optionalString(req.query.category, { field: "category", max: 60 });
-  }
-  if (req.query.dietary) {
-    query.dietary = req.query.dietary;
-  }
-  if (req.query.available !== undefined) {
-    query.available = v.boolean(req.query.available, "available");
-  }
+  // Bestsellers are ranked over the whole menu, not the filtered list, so a
+  // badge means the same thing whatever the student is searching for.
+  const topSellers = await Food.find({ orderCount: { $gt: 0 } }, { orderCount: 1 })
+    .sort({ orderCount: -1, _id: 1 })
+    .limit(config.canteen.bestsellerCount);
+  const bestsellerIds = bestsellerIdSet(topSellers, config.canteen.bestsellerCount);
 
-  let sort = { createdAt: 1 };
-  if (req.query.sort) {
-    const key = String(req.query.sort);
-    if (!SORT_MAP[key]) {
-      throw ApiError.badRequest(
-        `sort must be one of: ${Object.keys(SORT_MAP).join(", ")}`
-      );
-    }
-    sort = SORT_MAP[key];
-  }
-
-  const foods = await Food.find(query).sort(sort);
-  res.json(foods);
+  const now = Date.now();
+  res.json(
+    foods.map((food) => {
+      const plain = food.toJSON();
+      plain.badges = badgesFor(plain, {
+        bestsellerIds,
+        now,
+        newItemDays: config.canteen.newItemDays,
+      });
+      return plain;
+    })
+  );
 });
 
 /** Distinct categories, for building filter controls. */
 router.get("/categories", async (req, res) => {
   const categories = await Food.distinct("category");
   res.json(categories.filter(Boolean).sort());
+});
+
+/** One menu item, with its badges. Public, like the list. */
+router.get("/:id", async (req, res) => {
+  const id = v.objectId(req.params.id, "food id");
+  const food = await Food.findById(id);
+  if (!food) throw ApiError.notFound("Food item not found");
+  const top = await Food.find({ orderCount: { $gt: 0 } }, { orderCount: 1 })
+    .sort({ orderCount: -1, _id: 1 })
+    .limit(config.canteen.bestsellerCount);
+  const plain = food.toJSON();
+  plain.badges = badgesFor(plain, {
+    bestsellerIds: bestsellerIdSet(top, config.canteen.bestsellerCount),
+    newItemDays: config.canteen.newItemDays,
+  });
+  res.json(plain);
 });
 
 // Admin/staff: add food
@@ -116,6 +157,10 @@ router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
       max: 240,
     });
   }
+  if (body.featured !== undefined) payload.featured = v.boolean(body.featured, "featured");
+  if (body.addOns !== undefined) payload.addOns = addOnList(body.addOns);
+  if (body.ingredients !== undefined) payload.ingredients = stringList(body.ingredients, { field: "ingredients" });
+  if (body.allergens !== undefined) payload.allergens = stringList(body.allergens, { field: "allergens" });
 
   if (isAdmin && body.lowStockThreshold !== undefined) {
     payload.lowStockThreshold = v.quantity(body.lowStockThreshold, {
@@ -194,6 +239,10 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
       max: 240,
     });
   }
+  if (body.featured !== undefined) food.featured = v.boolean(body.featured, "featured");
+  if (body.addOns !== undefined) food.addOns = addOnList(body.addOns);
+  if (body.ingredients !== undefined) food.ingredients = stringList(body.ingredients, { field: "ingredients" });
+  if (body.allergens !== undefined) food.allergens = stringList(body.allergens, { field: "allergens" });
   if (body.stock !== undefined) {
     // Stock levels are administrator-only. Staff can still manage the menu.
     if (req.user.role !== "admin") {

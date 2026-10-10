@@ -35,6 +35,16 @@ const orderItemSchema = new mongoose.Schema(
     stockReserved: { type: Boolean, default: false },
     stockConsumed: { type: Boolean, default: false },
     stockReleased: { type: Boolean, default: false },
+
+    // ---- Phase 1 student-experience fields (additive). ----
+    // Snapshot of the chosen add-ons and their prices at purchase time.
+    addOns: {
+      type: [{ _id: false, label: { type: String, trim: true, maxlength: 60 }, price: { type: Number, min: 0 } }],
+      default: [],
+    },
+    // Unit price of the base item, before add-ons.
+    basePrice: { type: Number, min: 0, default: null },
+    specialInstructions: { type: String, trim: true, maxlength: 140, default: null },
   },
   { _id: false }
 );
@@ -76,6 +86,14 @@ const OrderSchema = new mongoose.Schema({
     },
   ],
   pickupSlot: { type: String, default: null, trim: true },
+  // Chosen pickup time (an exact grid slot). Null means "as soon as ready".
+  pickupAt: { type: Date, default: null },
+  // Itemized charges after the discount, e.g. packaging and tax.
+  charges: {
+    type: [{ _id: false, label: { type: String, maxlength: 60 }, amount: { type: Number, min: 0 } }],
+    default: [],
+  },
+  couponCode: { type: String, default: null, trim: true, maxlength: 40 },
   statusHistoryTotal: { type: Number, default: 0, min: 0 },
   statusHistoryTruncated: { type: Boolean, default: false },
   // Inventory work still owed for the current status (P2-R2). Written in the

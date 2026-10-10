@@ -186,3 +186,140 @@ MongoDB binary could be run here. The pure tests and build checks listed under "
 | Playwright | `npm run test:e2e` | Not run |
 | Browser | — | **Not performed** |
 
+## Student experience: Phase 1 of the feature spec (discovery, cart, tracking, account)
+
+Scope from the spec: discovery, cart and checkout, order tracking, and account.
+Status: implemented. The pure tests and the frontend build pass here. The
+database-backed tests and browser checks were **not run** (no MongoDB binary and
+no browser in this sandbox). See the verification table at the end.
+
+### Files added
+
+- Backend: `models/Coupon.js`, `models/Review.js`, `routes/coupons.js`,
+  `routes/reviews.js`, `services/checkout.js` (cart resolution shared by quote and
+  placement), `utils/discovery.js`, `utils/pricing.js`, `utils/pickupSlots.js`,
+  `utils/receipt.js`, `utils/reviews.js`, `utils/orderHistory.js`.
+- Backend tests: `test/studentPricing.test.js`, `test/studentDiscovery.test.js`,
+  `test/studentPure.test.js`, `test/studentCheckout.test.js` (all DB-free, run and
+  pass). `test/studentFeatures.test.js` (DB-backed, **written, not run**).
+- Frontend: `src/lib/cart.js`, `src/lib/menuFilters.js`, `src/lib/orderHistory.js`,
+  `src/lib/orderView.js`, `src/lib/download.js`; components under
+  `src/components/student/` (`FoodCard`, `MenuFilters`, `CartPanel`,
+  `PickupSlotPicker`, `OrderCard`, `OrderHistoryFilters`, `ReviewPanel`,
+  `AccountPanel`).
+- Frontend tests: `tests/unit/cart.test.js`, `tests/unit/studentLib.test.js`
+  (`npm run test:unit`, Node's built-in test runner, no new dependency).
+
+### Files changed
+
+- `backend/config.js`: `canteen` block (name, UTC offset, opening hours, slot
+  length, days, prep buffer, tax, packaging, bestseller count, new-item window).
+  All values are environment-driven and default to the previous behaviour.
+- `backend/models/FoodItem.js`: additive `featured`, `addOns`, `ingredients`,
+  `allergens`, `orderCount`, `ratingSum`, `ratingCount`, `ratingAverage`.
+- `backend/models/Order.js`: item `addOns`, `basePrice`, `specialInstructions`;
+  order `pickupAt`, `charges`, `couponCode`.
+- `backend/models/User.js`: `toPublicJSON()` now includes `phone` and
+  `notificationPrefs`.
+- `backend/routes/order.js`: `POST /` priced through `services/checkout.js`;
+  new `POST /quote`, `GET /slots`, `GET /:id/receipt`; `GET /` takes history filters.
+  `/slots` and `/quote` are registered before `/:id`.
+- `backend/routes/food.js`: discovery filters and sorts, `badges` on each item,
+  `GET /:id`, admin/staff can set `featured`, `addOns`, `ingredients`, `allergens`.
+- `backend/routes/auth.js`: `PUT /me` accepts `phone`; new `POST /me/password`.
+- `backend/app.js`: mounts `/api/reviews` and `/api/coupons`.
+- `frontend/src/components/StudentDashboard.jsx`: rewritten to compose the new
+  components. The realtime client, ready alerts, Live/Offline indicator, favourites
+  and cancel flow are kept. Test IDs used by the e2e specs are kept
+  (`food-card`, `add-to-cart`, `sold-out`, `availability-<id>`, `checkout`,
+  `order-card`, `order-status`, `cancel-order`, `ready-alert`, and the first
+  "Total:" on the page).
+- `frontend/package.json`: `test:unit` script.
+
+### Features added (spec item to what was built)
+
+- **Discovery.** Search (name, description, category), category, veg / non-veg
+  (egg counts as non-veg), exact dietary value, price range, available only,
+  featured, favourites only (client-side), sort by name, price, most ordered, top
+  rated, or newest. Badges: Featured (admin flag), Bestseller (top 5 by units
+  ordered, over the whole menu, never-ordered items excluded), New (created in
+  the last 7 days). Each card shows image, prep time, ingredients, allergens and
+  rating.
+- **Cart and checkout.** Quantities, saved cart (localStorage, with older saved
+  carts upgraded), menu-defined add-ons (priced by the server), special
+  instructions (140 characters), pickup slot, coupon code, and an itemized bill
+  (subtotal, discount, charges, total). Unavailable and sold-out items are refused
+  by the server with 409. The bill is priced by `POST /api/orders/quote`, the same
+  code path as checkout.
+- **Pickup slots.** 15-minute grid in canteen-local time (IST by default), open
+  09:00 to 18:00, two days ahead. The earliest slot is the longest prep time in
+  the cart plus a 5-minute buffer. A pickup time must be an exact open slot.
+  Leaving it empty means "as soon as ready", as before.
+- **Coupons.** Percentage or flat, with a minimum subtotal, an optional cap, an
+  optional expiry, an active flag, and an optional usage limit. A redemption is
+  claimed with a conditional atomic update, so a limited coupon cannot be used
+  past its limit by concurrent checkouts. A failed order releases the claim.
+- **Tracking.** Existing timeline and realtime updates. Added: "About N min left"
+  countdown from the estimate, pickup time, and cancel shown only when the server
+  reports `canCancel`.
+- **Account.** Profile (name, phone), notification preferences (now editable),
+  password change (current password required; other sessions are revoked and the
+  new token replaces the old one on this device), favourites (existing), reorder
+  (keeps the chosen options; prices are re-read at checkout), reviews after
+  completion (1 to 5 stars, once per item per order; updates the item's average),
+  history filters (status, from and to dates), and plain-text receipt download.
+
+### Behaviour changes (API)
+
+- `GET /api/food`: an unknown `dietary` or `veg` value is now a 400. It previously
+  matched nothing and returned an empty list. Unknown `sort` values remain 400.
+- `GET /api/orders`: with no parameters it still returns the full history. `limit`
+  is optional and capped at 500.
+- `POST /api/orders`: accepts `items[].addOns` (labels), `items[].specialInstructions`,
+  `pickupAt` and `couponCode`. The response adds `subtotal`, `discount`, `charges`
+  and `couponCode`. `total` is the bill total. For a cart with no coupon and no
+  charges it equals the subtotal, as before.
+- Order items gain `addOns`, `basePrice` and `specialInstructions`. For new orders,
+  `price` is the unit price **including** add-ons, so `price x quantity` is the line
+  total. `basePrice` holds the base price. Older orders have no `basePrice`.
+- `PUT /api/auth/me` accepts `phone`. `POST /api/auth/me/password` is new.
+- `POST /api/food` and `PUT /api/food/:id` accept `featured`, `addOns`,
+  `ingredients` and `allergens` (admin or staff). Stock fields are unchanged.
+
+### Migrations introduced
+
+None required. Every new field has a default, so existing documents load and
+serialize as before. Coupons and reviews are new collections, created on first
+write. Existing menu items get `ratingAverage: 0` and `orderCount: 0` by default.
+
+### Known limitations (not built)
+
+- **No payments and no refunds.** Payment status is shown as stored (`unpaid` by
+  default). Nothing is charged or refunded.
+- **Pickup slots have no capacity limit.** The grid is a time choice only. Slots are
+  not reserved and cannot fill up.
+- **Coupon limits are global**, not per student.
+- **Reviews** cannot be edited or deleted and are not moderated. Public reviews show
+  the rating, comment and date only, never the reviewer.
+- **Cart is per browser** (localStorage). It is not synced between devices.
+- **Receipt** is plain text, not PDF.
+- **Notification preferences are stored but not delivered.** No email or SMS channel
+  exists yet.
+- **Reorder** cannot check whether an old add-on still exists until checkout, when
+  the server refuses it with a 400.
+- **Bestsellers** use lifetime units ordered, with no time window.
+- **Favourites filter** runs in the browser on the loaded menu.
+
+### Tests and checks performed (this environment)
+
+| Check | Command | Result |
+|---|---|---|
+| Backend pure suites | `node --test test/lifecycleMatrix.test.js test/sessionRules.test.js test/studentCheckout.test.js test/studentPricing.test.js test/studentDiscovery.test.js test/studentPure.test.js` | **374 / 374 pass** |
+| Backend DB-backed student suite | `test/studentFeatures.test.js` | **Written, syntax-checked, NOT executed** (no MongoDB binary) |
+| Backend DB-backed suites (existing) | `npm test` | **Not executed** (no MongoDB binary) |
+| Frontend unit tests | `npm run test:unit` | **25 / 25 pass** |
+| Frontend lint | `npx eslint .` | 0 errors. 3 warnings, all in code this change did not touch (`App.jsx`, `InventoryPanel.jsx`). Every new file is clean. |
+| Frontend build | `npx vite build` | **Pass** |
+| Server render of the student screens | `esbuild` bundle plus `react-dom/server` | Renders `StudentDashboard`, `FoodCard` (available, sold-out, exhausted), `CartPanel` (with and without a cart), `OrderCard` (Pending, Completed, Rejected), history and menu filters, and `AccountPanel`. Test IDs present, and Cancel and Rate buttons appear only when eligible. Render-only, not a browser test. |
+| Playwright end-to-end | `npm run test:e2e` | **Not run** (needs MongoDB and a browser) |
+| Browser | — | **Not performed** |

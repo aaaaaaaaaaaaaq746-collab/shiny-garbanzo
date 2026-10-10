@@ -63,6 +63,12 @@ UserSchema.methods.toPublicJSON = function () {
     name: this.name,
     email: this.email,
     role: this.role,
+    phone: this.phone ?? null,
+    notificationPrefs: {
+      orderUpdates: this.notificationPrefs?.orderUpdates ?? true,
+      promotions: this.notificationPrefs?.promotions ?? false,
+      sound: this.notificationPrefs?.sound ?? true,
+    },
   };
 };
 

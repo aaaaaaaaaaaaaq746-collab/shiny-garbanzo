@@ -16,7 +16,8 @@ Status key: **Done** (in the repo and verified as stated), **Done, unverified**
 | 1 | Security and stability hardening (M1) | **Done, unverified (DB)** | Items N1, N2 and N7 were open before this pass and are now fixed. See the Phase 1 table. |
 | 2 | Order lifecycle state machine and student cancellation | **Done, unverified (DB)** | See the Phase 2 table. Pure tests pass; DB tests are written but not executed here. |
 | 2.5 | Fix-all pass before Phase 3 (P2-R1, P2-R2, P1-N1/N2/N7/N13, P0-N9 to N12, N3 to N6) | **Done, unverified (DB)** | See the Fix-all table. |
-| 3+ | Menu/cart UX, tracking/receipts, analytics and exports, coupons, reviews, payments, QR, PWA, recommendations | **Open** | Milestones M2–M8 in `docs/AUDIT.md` §7. Payments, QR and PWA scope need decisions (§8). |
+| 1-SX | Student experience (feature spec Phase 1): discovery, cart and checkout, tracking, account | **Done, unverified (DB and browser)** | See the Student-experience table below. Pure tests, frontend unit tests, build and SSR render pass. DB tests and browser checks were not run. |
+| 3+ | Analytics and exports, payments, QR, PWA, recommendations | **Open** | Milestones M2–M8 in `docs/AUDIT.md` §7. Payments, QR and PWA scope need decisions (§8). Menu/cart UX, receipts, coupons and reviews were delivered under 1-SX. |
 
 ### Phase 1 — status detail
 
@@ -108,6 +109,27 @@ npm ci
 MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 ```
 
+## Student experience (1-SX) status detail
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Search, category, veg / non-veg, price range, availability, sort by price, popularity, rating | Done | `utils/discovery.js` (+ `studentDiscovery.test.js`); `GET /api/food`. |
+| Featured, bestselling and new badges | Done | `badgesFor` / `bestsellerIdSet`; the Bestseller badge is computed over the whole menu. |
+| Images, prep time, ingredients, allergens | Done | `FoodCard.jsx`; fields on `FoodItem`. |
+| Quantities, saved cart | Done | `src/lib/cart.js` (+ `tests/unit/cart.test.js`). |
+| Add-ons and special instructions | Done | `utils/pricing.js` `priceLine` (+ `studentPricing.test.js`). Add-on prices come from the menu. |
+| Pickup slots and estimated prep | Done | `utils/pickupSlots.js`; `GET /api/orders/slots`; the server rejects off-grid and closed times (`studentCheckout.test.js`). |
+| Itemized bill: discounts and charges | Done | `buildBill` (+ `studentPricing.test.js`); `POST /api/orders/quote`. |
+| Unavailable items blocked | Done | `services/checkout.js` returns 409. Stock-tracked items are counted across all lines. |
+| Status labels, timeline, timestamps, estimated wait, cancel eligibility, realtime | Done | `OrderCard.jsx`; `waitLabel`; `canCancel` from the server. Realtime kept. |
+| Profile, password, favourites, reorder | Done | `PUT /api/auth/me` (phone); `POST /api/auth/me/password` (revokes other sessions); reorder merges lines. |
+| Reviews after completion | Done | `routes/reviews.js` (one per item per order, unique index, atomic average). |
+| History filters, receipts, notification preferences | Done | `utils/orderHistory.js`, `utils/receipt.js`, `GET /api/orders/:id/receipt`; preferences are editable in the UI. Notification delivery is not built. |
+| Payments and refunds | **Not in scope** | The app records `paymentStatus` only. No money moves. See the open decisions. |
+
+The DB-backed tests for these routes are in `backend/test/studentFeatures.test.js`.
+They have not been run.
+
 ## Known limitations (documented, not fixed)
 
 - **Crash window on standalone MongoDB.** Without transactions, a claim is written before its counter change. A process crash between those two steps leaves a claim with no counter change, so that movement is never applied. This under-applies and never double-applies. Replica sets have no such window, because the claim and the counter change are one transaction. Recovery tooling is not built.
@@ -124,4 +146,4 @@ MONGOMS_SYSTEM_BINARY=/path/to/mongod npm test   # or just: npm test
 
 ## Next step
 
-Run `npm test` in `backend/` on a machine that can run MongoDB. That is the only check that exercises P2-R1, P2-R2, N2 to N5, and the DB-backed session tests. Report any failures before Phase 3.
+Run `npm test` in `backend/` on a machine that can run MongoDB. That is the only check that exercises P2-R1, P2-R2, N2 to N5, the DB-backed session tests, and `test/studentFeatures.test.js`. Then run the Playwright suite (`npm run test:e2e`) in a browser, and do a manual pass over the student screens. Report any failures before Phase 3.
