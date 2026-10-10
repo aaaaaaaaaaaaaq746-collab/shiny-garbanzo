@@ -24,7 +24,10 @@ const router = express.Router();
 /** Translate service errors into the project's standard HTTP responses. */
 function rethrow(err) {
   if (err instanceof inventory.InventoryError) {
-    throw new ApiError(err.statusCode, err.message);
+    const apiError = new ApiError(err.statusCode, err.message);
+    // Machine-readable code (e.g. CONCURRENT_UPDATE), returned in the body.
+    apiError.code = err.code;
+    throw apiError;
   }
   throw err;
 }
@@ -55,7 +58,7 @@ router.get("/", authMiddleware, adminMiddleware, async (req, res) => {
     if (state === "low" || state === "out") {
       query.trackInventory = true;
       query.$expr = {
-        [state === "out" ? "$lte" : "$lte"]: [
+        $lte: [
           { $subtract: ["$stock", "$reserved"] },
           state === "out" ? 0 : "$lowStockThreshold",
         ],
@@ -181,14 +184,13 @@ router.post("/:foodId/adjust", authMiddleware, adminMiddleware, async (req, res)
   const foodId = v.objectId(req.params.foodId, "food id");
   const body = v.object(req.body);
 
-  // Must be a signed whole number; 0 is rejected by the service.
+  // Either an absolute target (`set`) or a signed change (`delta`). The
+  // service computes the change from the stock value it reads, and applies it
+  // only if that value is still current (see services/inventory.js).
   let delta;
+  let setTo;
   if (body.set !== undefined) {
-    const target = v.quantity(body.set, { field: "set", min: 0, max: 1_000_000 });
-    const food = await Food.findById(foodId);
-    if (!food) throw ApiError.notFound("Food item not found");
-    delta = target - (food.stock ?? 0);
-    if (delta === 0) throw ApiError.badRequest("Stock is already at that value");
+    setTo = v.quantity(body.set, { field: "set", min: 0, max: 1_000_000 });
   } else {
     if (body.delta === undefined) throw ApiError.badRequest("delta or set is required");
     if (typeof body.delta !== "number" || !Number.isInteger(body.delta)) {
@@ -205,6 +207,7 @@ router.post("/:foodId/adjust", authMiddleware, adminMiddleware, async (req, res)
     updated = await inventory.adjustStock({
       foodId,
       delta,
+      setTo,
       reason,
       actor: req.user,
       unit: v.optionalString(body.unit, { field: "unit", max: 20 }),

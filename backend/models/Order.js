@@ -78,6 +78,12 @@ const OrderSchema = new mongoose.Schema({
   pickupSlot: { type: String, default: null, trim: true },
   statusHistoryTotal: { type: Number, default: 0, min: 0 },
   statusHistoryTruncated: { type: Boolean, default: false },
+  // Inventory work still owed for the current status (P2-R2). Written in the
+  // same atomic update as the status change that needs it, and cleared once
+  // the work succeeds. A request that finds a marker completes the work first,
+  // so a failed inventory step is retried instead of silently lost.
+  inventoryPendingKind: { type: String, enum: ["consume", "release", null], default: null },
+  inventoryPendingReason: { type: String, default: null, maxlength: 300 },
   paymentStatus: {
     type: String,
     enum: ["unpaid", "paid", "refunded"],

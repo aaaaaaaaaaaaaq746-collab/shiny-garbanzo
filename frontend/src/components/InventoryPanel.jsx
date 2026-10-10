@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { FaSyncAlt, FaHistory, FaExclamationTriangle } from "react-icons/fa";
 import api from "../api";
@@ -39,8 +39,6 @@ export default function InventoryPanel() {
   // Movement history drawer.
   const [historyFor, setHistoryFor] = useState(null);
   const [history, setHistory] = useState([]);
-
-  const seenFoodIds = useRef(new Set());
 
   const loadItems = useCallback(async () => {
     const params = new URLSearchParams();

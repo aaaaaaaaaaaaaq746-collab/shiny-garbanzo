@@ -22,6 +22,9 @@ const UserSchema = new mongoose.Schema({
   // ---- documents continue to validate untouched.
   phone: { type: String, default: null, trim: true },
   isActive: { type: Boolean, default: true },
+  // Incremented on logout. A token carries the value it was issued with (`tv`);
+  // a mismatch means the session was ended. Default 0 keeps existing users valid.
+  tokenVersion: { type: Number, default: 0, min: 0 },
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "FoodItem" }],
   notificationPrefs: {
     orderUpdates: { type: Boolean, default: true },

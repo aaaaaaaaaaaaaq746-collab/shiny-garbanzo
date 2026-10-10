@@ -41,9 +41,8 @@ function parseReason(body, { required, what }) {
 }
 
 /**
- * Apply the inventory consequences of a completed status transition.
+ * Inventory consequences of a status transition, for reference:
  *
- * Rules (Phase 4):
  *  - Moving to Cancelled/Rejected from Pending/Accepted releases the
  *    outstanding reservation.
  *  - Cancelling from Preparing/Ready does NOT restore stock: the food has
@@ -56,12 +55,35 @@ function parseReason(body, { required, what }) {
  * Every step is idempotent via the ledger's unique operationId, so repeated
  * requests or duplicate real-time events cannot double-apply.
  */
-async function applyInventoryForTransition({ from, to, order, actor, reason }) {
-  const startsPreparation = ["Preparing", "Ready", "Completed"].includes(to);
-  const endsBeforePreparation =
-    ["Cancelled", "Rejected"].includes(to) && !["Preparing", "Ready", "Completed"].includes(from);
+/**
+ * Which inventory work a transition needs: "consume", "release" or null.
+ *
+ * Moving into preparation consumes the reservation. Cancelling or rejecting
+ * before preparation releases it. Cancelling from Preparing or Ready releases
+ * nothing, because the food was already consumed; stock is not restored
+ * automatically.
+ */
+function inventoryKindFor({ from, to }) {
+  if (["Preparing", "Ready", "Completed"].includes(to)) return "consume";
+  if (
+    ["Cancelled", "Rejected"].includes(to) &&
+    !["Preparing", "Ready", "Completed"].includes(from)
+  ) {
+    return "release";
+  }
+  return null;
+}
 
-  if (startsPreparation) {
+/**
+ * Perform one inventory step for an order, then clear its pending marker.
+ *
+ * Both the consume and release paths are idempotent (each line is claimed
+ * first), so running this again after a failure is safe.
+ */
+async function runInventoryEffect({ kind, order, actor, reason }) {
+  let result = { consumed: 0, released: 0 };
+
+  if (kind === "consume") {
     const { consumed } = await inventory.consumeOrder({ order, actor });
     if (consumed.length) {
       await Order.updateOne(
@@ -70,10 +92,8 @@ async function applyInventoryForTransition({ from, to, order, actor, reason }) {
         { arrayFilters: [{ "el.inventoryTracked": true, "el.stockConsumed": { $ne: true } }] }
       ).catch(() => {});
     }
-    return { consumed: consumed.length, released: 0 };
-  }
-
-  if (endsBeforePreparation) {
+    result = { consumed: consumed.length, released: 0 };
+  } else if (kind === "release") {
     const { released } = await inventory.releaseOrder({ order, actor, reason });
     if (released.length) {
       await Order.updateOne(
@@ -82,11 +102,48 @@ async function applyInventoryForTransition({ from, to, order, actor, reason }) {
         { arrayFilters: [{ "el.inventoryTracked": true, "el.stockReleased": { $ne: true } }] }
       ).catch(() => {});
     }
-    return { consumed: 0, released: released.length };
+    result = { consumed: 0, released: released.length };
   }
 
-  return { consumed: 0, released: 0 };
+  // Clear the marker only if it is still the one we just completed. If this
+  // throws, the marker stays and the next request retries the work.
+  if (kind) {
+    await Order.updateOne(
+      { _id: order._id, inventoryPendingKind: kind },
+      { $set: { inventoryPendingKind: null, inventoryPendingReason: null } }
+    );
+  }
+
+  return result;
 }
+
+/**
+ * Complete inventory work owed by an earlier request whose status change
+ * committed but whose inventory step failed (P2-R2).
+ *
+ * Returns true when a pending step was found and completed. Callers that are
+ * retrying a transition that already took effect can then return success.
+ */
+async function completePendingInventory({ order, actor }) {
+  if (!order.inventoryPendingKind) return false;
+  const fresh = await Order.findById(order._id);
+  if (!fresh || !fresh.inventoryPendingKind) return false;
+  await runInventoryEffect({
+    kind: fresh.inventoryPendingKind,
+    order: fresh,
+    actor,
+    reason: fresh.inventoryPendingReason || null,
+  });
+  return true;
+}
+
+/** Inventory step for a transition that has just committed. */
+async function applyInventoryForTransition({ from, to, order, actor, reason }) {
+  const kind = inventoryKindFor({ from, to });
+  if (!kind) return { consumed: 0, released: 0 };
+  return runInventoryEffect({ kind, order, actor, reason });
+}
+
 /**
  * Apply a transition atomically.
  *
@@ -100,6 +157,9 @@ async function applyInventoryForTransition({ from, to, order, actor, reason }) {
  * transition record behind.
  */
 async function applyTransition({ orderId, expectedFrom, to, actor, reason }) {
+  // Inventory work this transition owes, recorded in the SAME atomic write as
+  // the status change so a crash cannot leave a change without its marker.
+  const pendingKind = inventoryKindFor({ from: expectedFrom, to });
   const entry = {
     status: to, // new status
     from: expectedFrom, // previous status
@@ -112,6 +172,8 @@ async function applyTransition({ orderId, expectedFrom, to, actor, reason }) {
   const set = { status: to };
   if (to === STATUS.CANCELLED) set.cancelledAt = new Date();
   if (to === STATUS.COMPLETED) set.completedAt = new Date();
+  set.inventoryPendingKind = pendingKind;
+  set.inventoryPendingReason = pendingKind ? reason || null : null;
 
   // Retention: bound the in-document history to the most recent N entries in
   // the SAME atomic update (`$slice`), while `$inc` keeps an exact total so
@@ -381,10 +443,18 @@ router.put("/:id/status", authMiddleware, adminOrStaffMiddleware, async (req, re
 
   const to = v.oneOf(body.status, ORDER_STATUSES, "status");
 
-  const order = await Order.findById(id);
+  let order = await Order.findById(id);
   if (!order) throw ApiError.notFound("Order not found");
 
+  // Finish inventory work left pending by an earlier request before anything
+  // else. If that request was this same transition, the retry succeeds.
+  const reconciled = await completePendingInventory({ order, actor: req.user });
+  if (reconciled) order = await Order.findById(id);
   const from = order.status;
+
+  if (reconciled && to === from) {
+    return res.json(decorate(order, req.user));
+  }
 
   // Throws 403 for an unauthorised role, 409 for an illegal transition.
   assertTransition({ from, to, role: req.user.role, strict: strictLifecycle });
@@ -439,13 +509,18 @@ router.post("/:id/cancel", authMiddleware, async (req, res) => {
   const id = v.objectId(req.params.id, "order id");
   const body = req.body ? v.object(req.body) : {};
 
-  const order = await Order.findById(id);
+  let order = await Order.findById(id);
   if (!order) throw ApiError.notFound("Order not found");
 
   // Ownership check. Students are confined to their own orders.
   if (req.user.role === "student" && String(order.student) !== String(req.user._id)) {
     throw ApiError.forbidden("You can only cancel your own orders");
   }
+
+  // Finish inventory work left pending by an earlier request (P2-R2). A retry
+  // of a cancellation whose release failed completes the release here.
+  const reconciled = await completePendingInventory({ order, actor: req.user });
+  if (reconciled) order = await Order.findById(id);
 
   const from = order.status;
 

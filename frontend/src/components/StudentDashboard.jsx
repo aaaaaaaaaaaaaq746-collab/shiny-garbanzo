@@ -133,7 +133,6 @@ export default function StudentDashboard({ name, onLogout }) {
     }
   }, [cart]);
 
-  useEffect(() => {
   /** Re-read the menu. Also used when an inventory change arrives. */
   const refreshFoods = useCallback(async () => {
     try {
@@ -144,6 +143,7 @@ export default function StudentDashboard({ name, onLogout }) {
     }
   }, []);
 
+  useEffect(() => {
     let cancelled = false;
 
     const fetchOrders = async () => {
@@ -171,7 +171,8 @@ export default function StudentDashboard({ name, onLogout }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshFoods]);
+
   /**
    * Re-read a single order from the authoritative REST endpoint.
    *
@@ -252,7 +253,7 @@ export default function StudentDashboard({ name, onLogout }) {
       }
       return [...prev, { ...food, quantity: 1 }];
     });
-  }, []);
+  }, [cart]);
 
   const changeQuantity = useCallback((id, delta) => {
     setCart((prev) =>

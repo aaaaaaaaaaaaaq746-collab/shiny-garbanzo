@@ -100,3 +100,89 @@ Route-level suites that need the database and were not executed here:
 - P2-R2 (Medium) — inventory effects after a committed transition are not retried.
 - P1-N1 and P1-N2 (High) — Phase 1 items still open in the code (deactivated-user REST
   access; staff stock writes).
+
+## Fix-all pass before Phase 3 (P2-R1, P2-R2, P1-N1/N2/N7/N13, N3–N6, P0-N9–N12)
+
+Scope: every open item in `PLAN.md`, approved by the project owner ("fixx all before i give u phase 3").
+`a.html` was kept. Each database-backed change below is **unverified in this environment**: no
+MongoDB binary could be run here. The pure tests and build checks listed under "Tests and checks" did run.
+
+### Files added
+- `backend/test/sessionRules.test.js`: 14 DB-free tests of token, deactivation and revocation rules (user lookup stubbed).
+- `backend/test/sessionRevocation.test.js`: DB-backed HTTP and Socket.IO tests for logout revocation, deactivation, legacy tokens and handshake rules.
+- `backend/test/foodStockAuthz.test.js`: DB-backed tests for stock authorization on PUT, the DELETE guard, and admin-only inventory fields on POST.
+- `backend/test/inventoryConcurrency.test.js`: DB-backed concurrency invariants: no lost update on adjust set/delta, no oversell, single consume, single release, and reservation claimed once.
+- `backend/test/pendingInventory.test.js`: DB-backed P2-R2 tests. A simulated outage after a committed status change is retried to completion exactly once.
+- `README.md`: setup, configuration, running the tests (including `MONGOMS_SYSTEM_BINARY`), and maintainer notes.
+- `PLAN.md`: rewritten with the status of every item.
+
+### Files changed
+- `backend/middleware/authMiddleware.js`: `resolveSessionUser` (signature, exists, `isActive`, `tokenVersion`) used by REST and sockets; shared `extractToken` for HTTP and handshake.
+- `backend/models/User.js`: `tokenVersion` (default 0).
+- `backend/routes/auth.js`: tokens carry `tv`; logout increments `tokenVersion`.
+- `backend/realtime.js`: socket auth uses the shared validator and token extractor; duplicate parser removed.
+- `backend/routes/food.js`: stock writes admin-only; tracked stock must go through the ledger; DELETE guard; admin-only inventory fields on create, with starting stock ledgered.
+- `backend/services/inventory.js`: claim-first for every movement; `adjustStock` takes `set` or `delta` with a conditional filter (`CONCURRENT_UPDATE`); `setTracking` ledgers stock differences; `reserveOrder` compensates only without transactions; `transactionsSupported` is no longer cached.
+- `backend/routes/inventory.js`: `set` passed to the service (no pre-read); redundant ternary removed; `InventoryError` code returned in the body.
+- `backend/middleware/errorHandler.js`: includes `code` in the body when an error carries one.
+- `backend/models/Order.js`: `inventoryPendingKind`, `inventoryPendingReason` (both default null).
+- `backend/routes/order.js`: pending markers written with the status change; pending work completed first in `PUT /:id/status` and `POST /:id/cancel`; retry of an applied transition returns 200.
+- `frontend/eslint.config.js`, `frontend/package.json` (+`lint` script, devDependencies), `frontend/package-lock.json`: working ESLint setup.
+- `frontend/src/components/StudentDashboard.jsx`: see Bugs fixed.
+- `frontend/src/components/InventoryPanel.jsx`: unused ref removed.
+- `frontend/e2e/kitchen.spec.js`: unused binding removed.
+- `docs/API.md` §4 (pending fields), §3 (retry rules), §5 (inventory wording), §7 (auth, food, adjust, tracking).
+- `docs/AUDIT.md`: status table for §4 added.
+
+### Files removed
+- `backend/it.txt`, `backend/st.txt`, `backend/tap.txt`, `frontend/pw.txt`, `frontend/pw2.txt` (scratch files, P0-N10).
+
+### Features added
+- Pending-inventory markers and automatic completion on retry (P2-R2).
+- Logout revocation through `tokenVersion` (P1-N13).
+- `npm run lint` in `frontend/`.
+
+### Bugs fixed
+- **Student dashboard crash (introduced in `d63395e`).** `StudentDashboard.jsx` referenced `refreshFoods` in a dependency array before it was defined, so the dashboard threw `ReferenceError` on every render. The Vite build passes because it does not check undefined identifiers. Also fixed: a `useCallback` nested inside an effect, and a stale `cart` closure in `addToCart`. Verified by server-rendering the committed file (fails) and the fixed file (renders). This is not a browser test.
+- **P1-N1** deactivated accounts were refused only at login and on sockets. REST routes now refuse them too.
+- **P1-N2** staff could set stock through `PUT /api/food/:id`.
+- **P2-R1** inventory counters changed before the ledger claim (double-apply risk under concurrency).
+- **P2-R2** a failed inventory step after a committed status change was never retried.
+- **N3** deleting an item with open reservations orphaned them.
+- **N4** an item could not be stock-managed at creation.
+- **N5** concurrent `set` adjustments could compute a wrong delta.
+- **N6** stray `reserved_` key; redundant ternary.
+- **N7** duplicate `extractToken`.
+- **Review fixes:** transactional `reserveOrder` could compensate lines already rolled back and could double-count on transaction retry; `transactionsSupported` cached a pre-connection `false`; `setTracking` changed stock without a ledger delta; a failed starting-stock step left a half-configured item.
+
+### Behaviour changes (API)
+- Staff `PUT /api/food/:id` with `stock` → `403` (was `200`).
+- Admin `PUT /api/food/:id` with `stock` on a tracked item → `400` (was `200`).
+- Staff `POST /api/food` with inventory fields → `403`.
+- `DELETE /api/food/:id` with reservations → `409`.
+- Logout ends all sessions for that account (documented in `docs/API.md` §7.2).
+- Inventory adjust responses include `code` (e.g. `CONCURRENT_UPDATE`).
+
+### Migrations introduced
+- Additive only, no script required. `User.tokenVersion` and `Order.inventoryPendingKind` / `inventoryPendingReason` default when absent. Existing tokens work until logout.
+
+### Known limitations
+- Standalone MongoDB: a crash between a ledger claim and its counter change leaves that movement unapplied (not doubled). Replica sets are atomic.
+- Logout is account-wide by design.
+- Pending inventory work is completed by the next status-changing request for that order, not in the background.
+
+### Tests and checks performed
+
+| Check | Command | Result |
+|---|---|---|
+| Frontend lint | `npx eslint .` | **Pass**: 0 errors, 4 warnings (`react-hooks/set-state-in-effect`, deliberately warn-level) |
+| Frontend build | `npm run build` | **Pass** |
+| StudentDashboard render (committed vs fixed) | `esbuild` bundle + `react-dom/server` | Committed: `ReferenceError`. Fixed: renders. (Render only, not a browser test.) |
+| Backend module load | `node -e "require(...)"` on every changed module | **Pass** |
+| Session rules (DB-free) | `node --test test/sessionRules.test.js` | **14 / 14 pass** |
+| Lifecycle matrix (DB-free) | `node --test test/lifecycleMatrix.test.js` | **308 / 308 pass** |
+| New DB-backed suites | `sessionRevocation`, `foodStockAuthz`, `inventoryConcurrency`, `pendingInventory` | **Written, syntax-checked, NOT executed** (need MongoDB) |
+| Full backend suite | `npm test` | **551 run: 326 pass, 225 fail.** All 225 failures are `hookFailed` (the `before` hook could not start MongoDB: `fastdl.mongodb.org` blocked). Zero assertion failures. The 38 new DB-backed tests did not execute. Before this pass: 499 run, 312 pass, 187 fail, same cause. |
+| Playwright | `npm run test:e2e` | Not run |
+| Browser | — | **Not performed** |
+

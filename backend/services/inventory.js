@@ -9,49 +9,54 @@ const InventoryMovement = require("../models/InventoryMovement");
  * --------------
  *     available = physical stock - reserved
  *
- * SAFETY MODEL (why this is correct WITHOUT multi-document transactions)
- * ---------------------------------------------------------------------
- * Every counter lives on a single FoodItem document, so each movement is one
- * atomic conditional update. MongoDB guarantees single-document atomicity, so
- * the oversell guard holds on a standalone mongod:
+ * EVERY COUNTER CHANGE IS CLAIMED FIRST (Phase 2, fix P2-R1)
+ * ----------------------------------------------------------
+ * Each movement (reserve, release, consume, adjustment, tracking) follows the
+ * same order:
  *
- *   reserve : filter { available >= qty }        -> $inc { reserved: +qty }
- *   consume : filter { reserved  >= qty }        -> $inc { stock: -qty, reserved: -qty }
- *   release : filter { reserved  >= qty }        -> $inc { reserved: -qty }
+ *   1. CLAIM   insert the ledger row. Its `operationId` is unique, so at most
+ *              one caller can create it. A duplicate gets E11000 and does
+ *              nothing further.
+ *   2. APPLY   change the FoodItem counters with a conditional update that
+ *              re-checks the guard (e.g. reserved >= quantity).
+ *   3. FINALIZE write the resulting counters onto the ledger row.
  *
- * A failing filter means the condition no longer holds, so the update is
- * refused rather than producing a negative quantity.
+ * If the guard fails in step 2, the claim is removed (abandon) and the
+ * movement is reported as refused. Previously the counters were changed
+ * before the claim, so two concurrent callers could both change the counters
+ * and only one ledger row survived.
  *
- * Idempotency uses a deterministic operationId per (order, food, movement)
- * and a UNIQUE index on the ledger. A duplicate request collides on that index
- * and is treated as "already done", never as a second movement.
+ * TRANSACTIONS
+ * ------------
+ * On a replica set, reserveOrder() runs all of its claims and counter changes
+ * inside one transaction, passing the session to every write, so an abort
+ * rolls the ledger back together with the counters. On a standalone server
+ * each step is individually atomic, and reserveOrder() compensates the lines
+ * it already applied.
  *
- * When the deployment DOES support transactions (replica set), reserveOrder()
- * additionally wraps its writes in a real transaction so a mid-way failure
- * rolls everything back instead of relying on compensation. See
- * transactionsSupported() for how support is detected.
+ * KNOWN LIMITATION (standalone only)
+ * ----------------------------------
+ * A process crash between step 1 and step 2 leaves a claim with no counter
+ * change. The movement is then never applied, and retries will see it as
+ * already done. This is the safe direction (no double application), but it
+ * can under-apply. On a replica set the two steps are one transaction, so the
+ * window does not exist. Recovery tooling is recorded in PLAN.md.
  */
 
-const transactionsSupported = (() => {
-  let cached;
-  return () => {
-    if (cached !== undefined) return cached;
-    const topology = mongoose.connection?.client?.topology;
-    const desc = topology?.description;
-    if (!desc) return (cached = false);
-    const type = desc.type;
-    // Supported topologies: "ReplicaSetWithPrimary" / "ReplicaSetNoPrimary" / "Sharded"
-    // NOTE: the driver's "Single" topology means a STANDALONE mongod, which
-    // does NOT support transactions. It must never appear in this list.
-    const supported = [
-      "ReplicaSetWithPrimary",
-      "ReplicaSetNoPrimary",
-      "Sharded",
-    ].includes(type);
-    return (cached = supported);
-  };
-})();
-
+/**
+ * Whether the connected deployment supports multi-document transactions.
+ *
+ * Read on every call and never cached: called before the connection is
+ * established it returns false for that call only, rather than fixing the
+ * answer for the life of the process.
+ */
+function transactionsSupported() {
+  const desc = mongoose.connection?.client?.topology?.description;
+  if (!desc) return false;
+  // The driver's "Single" topology is a STANDALONE mongod, which does not
+  // support transactions, so it is deliberately absent from this list.
+  return ["ReplicaSetWithPrimary", "ReplicaSetNoPrimary", "Sharded"].includes(desc.type);
+}
 
 /** Run `work` inside a real transaction when the deployment allows it. */
 async function withOptionalTransaction(work) {
@@ -89,48 +94,70 @@ class InventoryError extends Error {
 }
 
 /**
- * Insert the ledger entry that gates this movement.
- * Returns false when the movement was already recorded (duplicate).
+ * STEP 1 — claim a movement by inserting its ledger row.
+ *
+ * Returns true when this caller created the row (and therefore owns the
+ * movement), false when the movement was already claimed. Pass `session` so
+ * the claim is rolled back together with the surrounding transaction.
  */
-async function claimOperation({ operationId, food, orderId, type, quantity, actor, reason, deltas }) {
+async function claimOperation({
+  operationId,
+  foodId,
+  orderId = null,
+  type,
+  quantity,
+  actor,
+  reason,
+  deltas,
+  session = null,
+}) {
   try {
-    await InventoryMovement.create({
-      operationId,
-      food: food._id,
-      order: orderId || null,
-      type,
-      quantity,
-      stockDelta: deltas.stockDelta,
-      reservedDelta: deltas.reservedDelta,
-      actor: actor?._id || null,
-      actorRole: actor?.role || null,
-      reason: reason || InventoryMovement.REASONS[type] || null,
-      at: new Date(),
-    });
+    await InventoryMovement.create(
+      [
+        {
+          operationId,
+          food: foodId,
+          order: orderId || null,
+          type,
+          quantity,
+          stockDelta: deltas.stockDelta,
+          reservedDelta: deltas.reservedDelta,
+          stockAfter: null,
+          reservedAfter: null,
+          actor: actor?._id || null,
+          actorRole: actor?.role || null,
+          reason: reason || InventoryMovement.REASONS[type] || null,
+          at: new Date(),
+        },
+      ],
+      session ? { session } : {}
+    );
     return true;
   } catch (err) {
-    if (err.code === 11000) return false; // already applied
+    if (err.code === 11000) return false; // already claimed
     throw err;
   }
 }
 
-/** Overwrite a ledger row with the resulting counters. */
-async function finalizeOperation(operationId, { stockAfter, reservedAfter }) {
+/** Record the resulting counters on a claimed ledger row. */
+async function finalizeOperation(operationId, { stockAfter, reservedAfter }, session = null) {
   await InventoryMovement.updateOne(
     { operationId },
-    { $set: { stockAfter, reservedAfter } }
+    { $set: { stockAfter, reservedAfter } },
+    session ? { session } : {}
   );
 }
 
-/** Remove a ledger row when its movement could not be applied. */
-async function abandonOperation(operationId) {
-  await InventoryMovement.deleteOne({ operationId });
+/** Remove a claim whose counter change was refused (nothing was applied). */
+async function abandonOperation(operationId, session = null) {
+  await InventoryMovement.deleteOne({ operationId }, session ? { session } : {});
 }
 
 /**
  * Reserve stock for one order line.
  *
- * Atomic and idempotent. Throws InventoryError when insufficient stock.
+ * Claim first, so a duplicate request cannot change the counters twice.
+ * Throws InventoryError when there is insufficient stock.
  */
 async function reserveOne({ foodId, quantity, orderId, actor, session = null }) {
   const operationId = operationIdFor("reserve", orderId, foodId);
@@ -140,8 +167,17 @@ async function reserveOne({ foodId, quantity, orderId, actor, session = null }) 
   if (!food) throw new InventoryError("FOOD_NOT_FOUND", "Food item not found", 404);
   if (food.trackInventory !== true) return { skipped: true };
 
-  const already = await InventoryMovement.exists({ operationId }).session(session);
-  if (already) return { duplicate: true };
+  const claimed = await claimOperation({
+    operationId,
+    foodId,
+    orderId,
+    type: "reserve",
+    quantity,
+    actor,
+    deltas: { stockDelta: 0, reservedDelta: quantity },
+    session,
+  });
+  if (!claimed) return { duplicate: true };
 
   const filter = {
     _id: foodId,
@@ -157,6 +193,7 @@ async function reserveOne({ foodId, quantity, orderId, actor, session = null }) 
   );
 
   if (!updated) {
+    await abandonOperation(operationId, session);
     // Distinguish "no stock" from "already reserved by someone else".
     const fresh = await Food.findById(foodId).session(session);
     const sellable = fresh ? fresh.sellableQty() : 0;
@@ -169,21 +206,13 @@ async function reserveOne({ foodId, quantity, orderId, actor, session = null }) 
     );
   }
 
-  await claimOperation({
+  await finalizeOperation(
     operationId,
-    food: updated,
-    orderId,
-    type: "reserve",
-    quantity,
-    actor,
-    deltas: { stockDelta: 0, reservedDelta: quantity },
-  });
-  await finalizeOperation(operationId, {
-    stockAfter: updated.stock,
-    reservedAfter: updated.reserved,
-  });
+    { stockAfter: updated.stock, reservedAfter: updated.reserved },
+    session
+  );
 
-  return { reserved: quantity, stock: updated.stock, reserved_: updated.reserved };
+  return { reserved: quantity, stock: updated.stock, reservedAfter: updated.reserved };
 }
 
 /**
@@ -194,11 +223,16 @@ async function reserveOne({ foodId, quantity, orderId, actor, session = null }) 
  * compensated, and every step is individually atomic.
  */
 async function reserveOrder({ order, items, actor }) {
-  const results = [];
-  const applied = [];
+  // Lines applied so far. Only used on the standalone (non-transactional) path,
+  // where each step is already committed and must be compensated by hand.
+  let applied = [];
 
   try {
-    await withOptionalTransaction(async (session) => {
+    const { result } = await withOptionalTransaction(async (session) => {
+      // A transaction may re-run this callback after a transient error, so
+      // every attempt starts from an empty list.
+      applied = [];
+      const results = [];
       for (const line of items) {
         if (line.inventoryTracked !== true) {
           results.push({ food: line.food, skipped: true });
@@ -216,18 +250,25 @@ async function reserveOrder({ order, items, actor }) {
           applied.push({ foodId: line.food, quantity: line.quantity });
         }
       }
+      return results;
     });
-    return { reserved: true, results };
+    return { reserved: true, results: result };
   } catch (err) {
-    // Compensate anything already applied (only reached without transactions).
-    for (const a of applied) {
-      await releaseRaw({ foodId: a.foodId, quantity: a.quantity, orderId: order._id });
+    // With a transaction, the abort already rolled back every line. Compensating
+    // here would release stock that was never held, so only the standalone path
+    // compensates. Each compensation also withdraws its claim, so the ledger
+    // keeps matching the counters.
+    if (!transactionsSupported()) {
+      for (const a of applied) {
+        await releaseRaw({ foodId: a.foodId, quantity: a.quantity });
+        await abandonOperation(operationIdFor("reserve", order._id, a.foodId)).catch(() => {});
+      }
     }
     throw err;
   }
 }
 
-/** Release reserved quantity without touching the ledger (compensation path). */
+/** Release reserved quantity without a ledger entry (compensation path only). */
 async function releaseRaw({ foodId, quantity }) {
   return Food.findOneAndUpdate(
     { _id: foodId, reserved: { $gte: quantity } },
@@ -238,7 +279,7 @@ async function releaseRaw({ foodId, quantity }) {
 
 /**
  * Release the reservations of an order (cancel / reject before preparation).
- * Idempotent via the ledger's unique operationId.
+ * Idempotent: each line is claimed before its reservation is returned.
  */
 async function releaseOrder({ order, actor, reason }) {
   const released = [];
@@ -249,38 +290,39 @@ async function releaseOrder({ order, actor, reason }) {
     if (line.stockConsumed === true) continue;
     if (line.stockReleased === true) continue;
 
+    const qty = line.reservedQty ?? line.quantity;
     const operationId = operationIdFor("release", order._id, line.food);
 
-    const existing = await InventoryMovement.findOne({ operationId });
-    if (existing) continue; // already released
+    const claimed = await claimOperation({
+      operationId,
+      foodId: line.food,
+      orderId: order._id,
+      type: "release",
+      quantity: qty,
+      actor,
+      reason,
+      deltas: { stockDelta: 0, reservedDelta: -qty },
+    });
+    if (!claimed) continue; // already released (or being released)
 
     const updated = await Food.findOneAndUpdate(
-      { _id: line.food, reserved: { $gte: line.reservedQty ?? line.quantity } },
-      {
-        $inc: { reserved: -(line.reservedQty ?? line.quantity) },
-        $set: { updatedAt: new Date() },
-      },
+      { _id: line.food, reserved: { $gte: qty } },
+      { $inc: { reserved: -qty }, $set: { updatedAt: new Date() } },
       { new: true }
     );
 
-    if (!updated) continue; // nothing left to release
+    if (!updated) {
+      // Nothing left to release for this line; withdraw the claim.
+      await abandonOperation(operationId);
+      continue;
+    }
 
-    await claimOperation({
-      operationId,
-      food: updated,
-      orderId: order._id,
-      type: "release",
-      quantity: line.reservedQty ?? line.quantity,
-      actor,
-      reason,
-      deltas: { stockDelta: 0, reservedDelta: -(line.reservedQty ?? line.quantity) },
-    });
     await finalizeOperation(operationId, {
       stockAfter: updated.stock,
       reservedAfter: updated.reserved,
     });
 
-    released.push({ food: line.food, quantity: line.reservedQty ?? line.quantity });
+    released.push({ food: line.food, quantity: qty });
   }
 
   return { released };
@@ -288,7 +330,7 @@ async function releaseOrder({ order, actor, reason }) {
 
 /**
  * Consume reservations when preparation begins: physical stock goes down.
- * Idempotent — a duplicate request finds the ledger row and does nothing.
+ * Idempotent: each line is claimed before the counters change.
  */
 async function consumeOrder({ order, actor }) {
   const consumed = [];
@@ -301,8 +343,16 @@ async function consumeOrder({ order, actor }) {
     const qty = line.reservedQty ?? line.quantity;
     const operationId = operationIdFor("consume", order._id, line.food);
 
-    const existing = await InventoryMovement.findOne({ operationId });
-    if (existing) continue;
+    const claimed = await claimOperation({
+      operationId,
+      foodId: line.food,
+      orderId: order._id,
+      type: "consume",
+      quantity: qty,
+      actor,
+      deltas: { stockDelta: -qty, reservedDelta: -qty },
+    });
+    if (!claimed) continue;
 
     // Guard on reserved: guarantees stock and reserved never go negative.
     const updated = await Food.findOneAndUpdate(
@@ -314,17 +364,11 @@ async function consumeOrder({ order, actor }) {
       { new: true }
     );
 
-    if (!updated) continue; // already consumed or released elsewhere
+    if (!updated) {
+      await abandonOperation(operationId);
+      continue;
+    }
 
-    await claimOperation({
-      operationId,
-      food: updated,
-      orderId: order._id,
-      type: "consume",
-      quantity: qty,
-      actor,
-      deltas: { stockDelta: -qty, reservedDelta: -qty },
-    });
     await finalizeOperation(operationId, {
       stockAfter: updated.stock,
       reservedAfter: updated.reserved,
@@ -338,10 +382,15 @@ async function consumeOrder({ order, actor }) {
 
 /**
  * Manual stock adjustment. Administrator only, reason mandatory.
- * `delta` is signed against physical stock.
+ *
+ * Either `delta` (signed change) or `setTo` (absolute target) is given.
+ * The change is applied only if stock still equals the value it was computed
+ * from, so two concurrent adjustments can never both be computed from the
+ * same starting point. The loser receives 409 and nothing is applied.
  */
-async function adjustStock({ foodId, delta, reason, actor, unit }) {
-  if (!Number.isInteger(delta) || delta === 0) {
+async function adjustStock({ foodId, delta, setTo, reason, actor, unit }) {
+  const isSet = setTo !== undefined && setTo !== null;
+  if (!isSet && (!Number.isInteger(delta) || delta === 0)) {
     throw new InventoryError("INVALID_DELTA", "Adjustment must be a non-zero whole number", 400);
   }
   if (!reason || !String(reason).trim()) {
@@ -358,23 +407,43 @@ async function adjustStock({ foodId, delta, reason, actor, unit }) {
     );
   }
 
+  const observed = food.stock ?? null; // value this calculation is based on
+  const current = observed ?? 0;
+  const actualDelta = isSet ? setTo - current : delta;
+  if (actualDelta === 0) {
+    throw new InventoryError("NO_CHANGE", "Stock is already at that value", 400);
+  }
+
   // Never allow a negative result, even via a direct set.
-  const target = (food.stock ?? 0) + delta;
+  const target = current + actualDelta;
   if (target < 0) {
     throw new InventoryError("NEGATIVE_STOCK", "Stock cannot be reduced below zero", 400);
   }
 
   const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const operationId = adjustmentId(foodId, nonce);
+  const cleanReason = String(reason).trim();
+
+  // Claim first, then apply only if stock is unchanged since we read it.
+  await claimOperation({
+    operationId,
+    foodId,
+    orderId: null,
+    type: "adjustment",
+    quantity: Math.abs(actualDelta),
+    actor,
+    reason: cleanReason,
+    deltas: { stockDelta: actualDelta, reservedDelta: 0 },
+  });
 
   const updated = await Food.findOneAndUpdate(
-    { _id: foodId, trackInventory: true },
+    { _id: foodId, trackInventory: true, stock: observed },
     {
       $set: {
         stock: target,
         updatedAt: new Date(),
         lastStockAdjustmentAt: new Date(),
-        lastStockAdjustmentReason: String(reason).trim().slice(0, 300),
+        lastStockAdjustmentReason: cleanReason.slice(0, 300),
         lastStockAdjustmentBy: actor._id,
         ...(unit ? { unit } : {}),
       },
@@ -382,16 +451,15 @@ async function adjustStock({ foodId, delta, reason, actor, unit }) {
     { new: true }
   );
 
-  await claimOperation({
-    operationId,
-    food: updated,
-    orderId: null,
-    type: "adjustment",
-    quantity: Math.abs(delta),
-    actor,
-    reason: String(reason).trim(),
-    deltas: { stockDelta: delta, reservedDelta: 0 },
-  });
+  if (!updated) {
+    await abandonOperation(operationId);
+    throw new InventoryError(
+      "CONCURRENT_UPDATE",
+      "Stock changed while this adjustment was being saved. Reload and try again.",
+      409
+    );
+  }
+
   await finalizeOperation(operationId, {
     stockAfter: updated.stock,
     reservedAfter: updated.reserved,
@@ -406,6 +474,8 @@ async function setTracking({ foodId, enabled, stock, actor, reason }) {
   if (!food) throw new InventoryError("FOOD_NOT_FOUND", "Food item not found", 404);
 
   const update = { trackInventory: enabled === true, updatedAt: new Date() };
+  const previousStock = food.stock ?? 0;
+  let newStock = food.stock ?? null;
 
   if (enabled === true) {
     const requested = Number.isInteger(stock) ? stock : null;
@@ -421,6 +491,7 @@ async function setTracking({ foodId, enabled, stock, actor, reason }) {
         throw new InventoryError("NEGATIVE_STOCK", "Stock cannot be negative", 400);
       }
       update.stock = requested;
+      newStock = requested;
     }
     if (food.reserved === null || food.reserved === undefined) update.reserved = 0;
   }
@@ -431,21 +502,28 @@ async function setTracking({ foodId, enabled, stock, actor, reason }) {
     (enabled === true ? "Inventory tracking enabled" : "Inventory tracking disabled");
   update.lastStockAdjustmentBy = actor._id;
 
-  const updated = await Food.findByIdAndUpdate(foodId, update, { new: true });
+  // Every change to physical stock must be explained by the ledger, so the
+  // movement records the difference between the old and new stock figures.
+  const stockDelta = enabled === true && newStock !== null ? newStock - previousStock : 0;
 
-  // Turning tracking on/off is itself an auditable event.
-  const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const operationId = `tracking:${foodId}:${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
   await claimOperation({
-    operationId: `tracking:${foodId}:${nonce}`,
-    food: updated,
+    operationId,
+    foodId,
     orderId: null,
     type: "adjustment",
-    quantity: 0,
+    quantity: Math.abs(stockDelta),
     actor,
     reason: update.lastStockAdjustmentReason,
-    deltas: { stockDelta: 0, reservedDelta: 0 },
+    deltas: { stockDelta, reservedDelta: 0 },
   });
-  await finalizeOperation(`tracking:${foodId}:${nonce}`, {
+
+  const updated = await Food.findByIdAndUpdate(foodId, update, { new: true });
+
+  await finalizeOperation(operationId, {
     stockAfter: updated.stock,
     reservedAfter: updated.reserved,
   });

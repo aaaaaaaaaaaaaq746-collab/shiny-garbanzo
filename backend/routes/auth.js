@@ -11,9 +11,11 @@ const router = express.Router();
 
 /** Sign a session token for a user document. */
 function issueToken(user) {
-  return jwt.sign({ id: user._id.toString() }, config.jwt.secret, {
-    expiresIn: config.jwt.expiresIn,
-  });
+  return jwt.sign(
+    { id: user._id.toString(), tv: user.tokenVersion ?? 0 },
+    config.jwt.secret,
+    { expiresIn: config.jwt.expiresIn }
+  );
 }
 
 // Signup — PUBLIC.
@@ -137,11 +139,14 @@ router.delete("/me/favorites/:foodId", authMiddleware, async (req, res) => {
 /**
  * Logout.
  *
- * Tokens are stateless JWTs, so the token is cleared client-side and a
- * short-lived "not after" hint is returned. Real revocation arrives with the
- * Phase 4 tokenVersion work.
+ * Revocation: the account's tokenVersion is incremented, so every token issued
+ * before this call (on any device) stops working. Clients should also discard
+ * their stored token. A new login issues a token for the new version.
  */
 router.post("/logout", authMiddleware, async (req, res) => {
+  // Revoke every token issued before now for this account by bumping the
+  // version their `tv` claim is checked against. Atomic single-document update.
+  await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
   res.json({ message: "Logged out", tokenDiscardedAt: new Date().toISOString() });
 });
 

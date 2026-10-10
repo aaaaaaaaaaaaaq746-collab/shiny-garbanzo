@@ -6,6 +6,8 @@ const {
 } = require("../middleware/authMiddleware");
 const ApiError = require("../utils/ApiError");
 const v = require("../utils/validators");
+const inventory = require("../services/inventory");
+const { UNITS } = require("../models/FoodItem");
 
 const router = express.Router();
 
@@ -82,6 +84,13 @@ router.get("/categories", async (req, res) => {
 // Admin/staff: add food
 router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
   const body = v.object(req.body);
+  const isAdmin = req.user.role === "admin";
+
+  // Inventory fields are administrator-only, matching the inventory API.
+  const inventoryFields = ["trackInventory", "stock", "lowStockThreshold", "unit"];
+  if (!isAdmin && inventoryFields.some((k) => body[k] !== undefined)) {
+    throw ApiError.forbidden("Only administrators can set inventory fields");
+  }
 
   const payload = {
     name: v.name(body.name, "name"),
@@ -108,7 +117,49 @@ router.post("/", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
     });
   }
 
+  if (isAdmin && body.lowStockThreshold !== undefined) {
+    payload.lowStockThreshold = v.quantity(body.lowStockThreshold, {
+      field: "lowStockThreshold",
+      min: 0,
+      max: 100000,
+    });
+  }
+  if (isAdmin && body.unit !== undefined) {
+    payload.unit = v.oneOf(body.unit, UNITS, "unit");
+  }
+
+  // Optional stock tracking at creation. The starting stock is recorded in the
+  // inventory ledger through the same path as enabling tracking later.
+  const track = body.trackInventory !== undefined ? v.boolean(body.trackInventory, "trackInventory") : false;
+  let startingStock = null;
+  if (track) {
+    if (body.stock === undefined) {
+      throw ApiError.badRequest("stock is required when trackInventory is true");
+    }
+    startingStock = v.quantity(body.stock, { field: "stock", min: 0, max: 1000000 });
+  } else if (body.stock !== undefined) {
+    throw ApiError.badRequest("stock can only be set when trackInventory is true");
+  }
+
   const food = await Food.create(payload);
+
+  if (track) {
+    try {
+      await inventory.setTracking({
+        foodId: food._id,
+        enabled: true,
+        stock: startingStock,
+        actor: req.user,
+        reason: "Initial stock on creation",
+      });
+    } catch (err) {
+      // Do not leave an item half-configured: remove it and report the cause.
+      await Food.deleteOne({ _id: food._id }).catch(() => {});
+      throw err;
+    }
+    return res.status(201).json(await Food.findById(food._id));
+  }
+
   res.status(201).json(food);
 });
 
@@ -144,6 +195,17 @@ router.put("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) => {
     });
   }
   if (body.stock !== undefined) {
+    // Stock levels are administrator-only. Staff can still manage the menu.
+    if (req.user.role !== "admin") {
+      throw ApiError.forbidden("Only administrators can change stock levels");
+    }
+    // A tracked item's stock moves only through the inventory service, so
+    // every change is written to the movement ledger.
+    if (food.trackInventory === true) {
+      throw ApiError.badRequest(
+        "Stock of an inventory-tracked item is changed through POST /api/inventory/:id/adjust so the change is recorded"
+      );
+    }
     food.stock = body.stock === null ? null : v.quantity(body.stock, { field: "stock", min: 0, max: 100000 });
   }
 
@@ -157,6 +219,14 @@ router.delete("/:id", authMiddleware, adminOrStaffMiddleware, async (req, res) =
 
   const food = await Food.findById(id);
   if (!food) throw ApiError.notFound("Food item not found");
+
+  // Deleting an item with open reservations would orphan them: the order can
+  // no longer be released or consumed against this item.
+  if (food.trackInventory === true && (food.reserved ?? 0) > 0) {
+    throw ApiError.conflict(
+      `Cannot delete "${food.name}" while ${food.reserved} unit(s) are reserved for open orders`
+    );
+  }
 
   await food.deleteOne();
   res.json({ message: "Food deleted" });

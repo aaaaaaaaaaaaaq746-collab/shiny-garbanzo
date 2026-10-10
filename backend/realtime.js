@@ -1,9 +1,8 @@
 const { Server } = require("socket.io");
-const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const config = require("./config");
-const User = require("./models/User");
 const Order = require("./models/Order");
+const { resolveSessionUser, extractToken } = require("./middleware/authMiddleware");
 
 /**
  * Real-time notification layer.
@@ -33,18 +32,6 @@ const ROOM = {
 
 const isStaffRole = (role) => role === "admin" || role === "staff";
 
-/** Pull a JWT from the handshake, accepting both supported conventions. */
-function extractToken(socket) {
-  const fromAuth = socket.handshake?.auth?.token;
-  if (typeof fromAuth === "string" && fromAuth.trim()) {
-    const parts = fromAuth.trim().split(/\s+/);
-    return parts.length > 1 && parts[0].toLowerCase() === "bearer" ? parts[1] : parts[0];
-  }
-  const header = socket.handshake?.headers?.authorization;
-  if (typeof header === "string" && header.trim()) return header.trim().split(/\s+/)[0];
-  return null;
-}
-
 /**
  * Attach real-time transport to an existing HTTP server.
  * Returns the Socket.IO server, or null when disabled by configuration.
@@ -71,23 +58,19 @@ function attachRealtime(httpServer) {
       return next(new Error("Authentication required"));
     }
 
-    let decoded;
+    // Same rules as REST (signature, account exists, active, not revoked).
+    // Errors are mapped onto the socket messages clients already handle.
+    let user;
     try {
-      decoded = jwt.verify(token, config.jwt.secret);
+      user = await resolveSessionUser(token);
     } catch (err) {
-      return next(
-        new Error(err.name === "TokenExpiredError" ? "Session expired" : "Invalid token")
-      );
-    }
-
-    if (!decoded?.id || !mongoose.Types.ObjectId.isValid(String(decoded.id))) {
+      const msg = String(err.message || "");
+      if (/expired/i.test(msg)) return next(new Error("Session expired"));
+      if (/no longer exists/i.test(msg)) return next(new Error("Account no longer exists"));
+      if (/deactivated/i.test(msg)) return next(new Error("Account deactivated"));
+      if (/ended/i.test(msg)) return next(new Error("Session has ended"));
       return next(new Error("Invalid token"));
     }
-
-    // Re-check the account: a token for a deleted user must not connect.
-    const user = await User.findById(decoded.id);
-    if (!user) return next(new Error("Account no longer exists"));
-    if (user.isActive === false) return next(new Error("Account deactivated"));
 
     socket.data.user = {
       id: user._id.toString(),

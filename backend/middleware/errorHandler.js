@@ -68,6 +68,7 @@ function errorHandler(err, req, res, next) {
   }
 
   const body = { message: apiError.message };
+  if (apiError.code) body.code = apiError.code;
   if (apiError.details && !config.isProduction) {
     body.details = apiError.details;
   }

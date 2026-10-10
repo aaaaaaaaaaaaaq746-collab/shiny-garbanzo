@@ -163,6 +163,28 @@ implemented in this codebase. The remaining real defects are the new items below
 | N13 | Auth | Logout does not revoke tokens (no `tokenVersion`). Password change/reset doesn't exist, so there is nothing to revoke on. | `routes/auth.js` |
 | N14 | High | (Found in Phase 2.) Inventory counter changes run before the ledger row is claimed, so duplicate concurrent movements can double-apply `reserved`/`stock`. Tracked as P2-R1 in `PLAN.md`. | `services/inventory.js` |
 
+### 4.1 Status after the fix-all pass
+
+"Done, unverified (DB)" means the change is in the code and its database tests are written, but they could not be executed in the sandbox. See `PLAN.md`.
+
+| ID | Status |
+|---|---|
+| N1 | Done, unverified (DB). `resolveSessionUser` refuses `isActive === false` on REST and sockets. |
+| N2 | Done, unverified (DB). Staff stock writes → 403. Tracked stock PUT → 400 (use ledger endpoint). |
+| N3 | Done, unverified (DB). DELETE with `reserved > 0` → 409. |
+| N4 | Done, unverified (DB). Admin-only inventory fields on POST; starting stock ledgered. |
+| N5 | Done, unverified (DB). `adjustStock` `set`/`delta` with conditional write; loser → 409 `CONCURRENT_UPDATE`. |
+| N6 | Done. Stray key removed; ternary simplified. |
+| N7 | Done. One `extractToken` (HTTP and handshake). |
+| N8 | Open (unchanged). Not part of this pass. |
+| N9 | Done. ESLint runs (flat config, dependencies declared). 0 errors, 4 warnings. |
+| N10 | Done. Scratch files removed; `a.html` kept. |
+| N11 | Partly done. Documented in `README.md` (`MONGOMS_SYSTEM_BINARY`). Still needs a binary to run the DB suite. |
+| N12 | Done. Root `README.md` written. Frontend README is still the Vite template. |
+| N13 | Done, unverified (DB). `tokenVersion` checked on every session; logout revokes all sessions for the account. |
+| N14 | Done, unverified (DB). Claim-first inventory (P2-R1). |
+| D1 (new) | Fixed. `StudentDashboard` crash from `d63395e` (undefined `refreshFoods` at render). |
+
 ---
 
 ## 5. Specification feature coverage

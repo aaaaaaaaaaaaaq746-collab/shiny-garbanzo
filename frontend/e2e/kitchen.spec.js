@@ -392,7 +392,7 @@ test.describe("Admin order board", () => {
   });
 
   test("a new order raises an alert on the open board", async ({ browser }) => {
-    const studentA = await createStudent();
+    await createStudent();
     const studentB = await createStudent();
     const aCtx = await browser.newContext();
     const bCtx = await browser.newContext();
