@@ -1,3 +1,5 @@
+// Test-only secret so config.js loads without a .env file (same value as helpers.js).
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-not-used-anywhere-else-0123456789";
 const { test, beforeEach, afterEach } = require("node:test");
 const assert = require("node:assert/strict");
 

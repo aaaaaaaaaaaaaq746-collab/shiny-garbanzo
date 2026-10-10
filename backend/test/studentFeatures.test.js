@@ -560,7 +560,10 @@ test("notifications: dispatch emails only students who opted in, and skips the r
   };
   const result = await dispatchDue({ transports, limit: 50 });
   assert.ok(result.processed >= 2);
-  assert.deepEqual(sent, [optedIn.email], "only the opted-in student receives email");
+  // Three status changes (Accepted, Preparing, Ready) = three notifications for
+  // the opted-in student, and none for the other student.
+  assert.equal(sent.length, 3, "one email per status change for the opted-in student");
+  assert.ok(sent.every((to) => to === optedIn.email), "only the opted-in student receives email");
 
   const rows = await Notification.find({ user: { $in: [optedIn.id, notIn.id] } }).lean();
   const skippedForNotIn = rows.filter((r) => String(r.user) === notIn.id);

@@ -487,3 +487,10 @@ Scope is the admin-management spec. It is separate from the order-lifecycle Phas
 - Ingredient-level inventory is deferred.
 - Kitchen priority is not a lifecycle transition and writes no status-history entry.
 - Staff sold-out marking is allowed. This is the current behaviour and is listed as an owner decision in PLAN.md.
+
+### Fixes from the first database-backed run (Windows, Node 24)
+- `POST /api/reviews` returned 500: Mongoose 9 needs `updatePipeline: true` for the pipeline-style rating update. Fixed in `routes/reviews.js`.
+- A replayed inventory reservation looped inside a transaction until the 120 s limit. `claimOperation` now checks for an existing ledger row before inserting, so a replay writes nothing. Fixed in `services/inventory.js`.
+- `test/kitchenRole.test.js` and `test/studentCheckout.test.js` failed when run without `JWT_SECRET` set. They now set a test-only secret, as `helpers.js` does.
+- Test expectations corrected: the kitchen feed refusal message (`access only`), and one notification per status change for the opted-in student.
+- Not re-run against MongoDB in this sandbox. Re-run `npm test` to confirm.

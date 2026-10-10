@@ -61,7 +61,7 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     },
     { $set: { ratingAverage: { $round: [{ $divide: ["$ratingSum", "$ratingCount"] }, 2] } } },
-  ]);
+  ], { updatePipeline: true });
 
   res.status(201).json({
     id: review._id.toString(),

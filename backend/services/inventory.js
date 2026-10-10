@@ -112,6 +112,13 @@ async function claimOperation({
   session = null,
 }) {
   try {
+    // A replay must not write at all: a duplicate insert inside a transaction
+    // aborts that transaction, and the retry loop then runs until it times out.
+    const existing = session
+      ? await InventoryMovement.exists({ operationId }).session(session)
+      : await InventoryMovement.exists({ operationId });
+    if (existing) return false;
+
     await InventoryMovement.create(
       [
         {

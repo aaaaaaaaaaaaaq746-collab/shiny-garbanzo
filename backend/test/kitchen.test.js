@@ -53,7 +53,7 @@ const kitchen = (token) => api().get("/api/orders/kitchen").set("Authorization",
 test("a student cannot read the kitchen feed", async () => {
   const res = await kitchen((await student()).token);
   assert.equal(res.status, 403);
-  assert.match(res.body.message, /staff only/i);
+  assert.match(res.body.message, /access only/i);
 });
 
 test("an unauthenticated request cannot read the kitchen feed", async () => {
